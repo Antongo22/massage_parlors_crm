@@ -47,10 +47,14 @@ ALTER TABLE "Appointment"
 -- она следует из durationMinutesSnapshot > 0.
 -- ---------------------------------------------------------------------------
 
+-- make_interval, а не умножение на INTERVAL '1 minute': PostgreSQL приводит
+-- integer * interval к double precision, то есть сравнивает метки времени
+-- через арифметику с плавающей точкой. Для минутных значений результат точен,
+-- но фиксировать такую форму в определении ограничения незачем.
 ALTER TABLE "Appointment"
   ADD CONSTRAINT appointment_duration_consistent CHECK (
-    "endsAt" = "startsAt" + "durationMinutesSnapshot" * INTERVAL '1 minute'
-    AND "blockedUntil" = "endsAt" + "bufferMinutesSnapshot" * INTERVAL '1 minute'
+    "endsAt" = "startsAt" + make_interval(mins => "durationMinutesSnapshot")
+    AND "blockedUntil" = "endsAt" + make_interval(mins => "bufferMinutesSnapshot")
   );
 
 -- ---------------------------------------------------------------------------

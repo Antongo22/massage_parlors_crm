@@ -1,0 +1,114 @@
+# Локальная разработка: `docker compose up` поднимает всё, включая приложение.
+# Продакшн-конфигурация с TLS и собранным образом — docker-compose.prod.yml.
+#
+# Приложение и воркер намеренно разные сервисы: воркер уведомлений не должен
+# делить процесс с веб-сервером, иначе перезапуск деплоя гасит очередь на лету,
+# а долгая рассылка отъедает event loop у запросов.
+
+name: massage-crm
+
+x-app-env: &app-env
+  # Внутри сети compose сервисы адресуются по именам, а не по localhost:
+  # значения DATABASE_URL и REDIS_URL из .env рассчитаны на инструменты,
+  # запускаемые на хосте (prisma CLI, тесты), и здесь namеренно переопределены.
+  DATABASE_URL: postgresql://${POSTGRES_USER:-crm}:${POSTGRES_PASSWORD:-crm}@postgres:5432/${POSTGRES_DB:-crm}?schema=public
+  REDIS_URL: redis://redis:6379
+  AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-me}
+  AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+  AUTH_TRUST_HOST: "true"
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+  SMTP_SECURE: "false"
+  MAIL_FROM: ${MAIL_FROM:-Массажный салон <noreply@example.com>}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-crm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm}
+      POSTGRES_DB: ${POSTGRES_DB:-crm}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Без healthcheck миграции стартуют раньше, чем БД примет соединения:
+      # контейнер «запущен» задолго до готовности Postgres.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crm} -d ${POSTGRES_DB:-crm}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # appendonly: отложенные задачи напоминаний должны переживать рестарт Redis,
+    # иначе клиенты молча не получат письма за 2 часа до сеанса.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    # Локальная замена SMTP: письма никуда не уходят, но видны на localhost:8025.
+    # Отправлять напоминания на реальные адреса из dev-окружения недопустимо.
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+
+  migrate:
+    # Одноразовый сервис: накатывает миграции и завершается. Приложение ждёт
+    # его успешного выхода, поэтому не может стартовать на несоответствующей схеме.
+    build:
+      context: .
+      target: dev
+    environment: *app-env
+    volumes:
+      - .:/app
+      - node-modules:/app/node_modules
+      - generated-client:/app/generated
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -c "npx prisma migrate deploy && npx prisma generate"
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: dev
+    restart: unless-stopped
+    environment: *app-env
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      # Исходники — с хоста, чтобы правки подхватывались без пересборки образа.
+      - .:/app
+      # node_modules и generated остаются контейнерными: на хосте они собраны
+      # под macOS, а внутри нужен linux/musl. Именованные тома перекрывают
+      # соответствующие каталоги бинда.
+      - node-modules:/app/node_modules
+      - generated-client:/app/generated
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:
+  redis-data:
+  node-modules:
+  generated-client:

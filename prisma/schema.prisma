@@ -4,16 +4,17 @@
 // индексы), живут в prisma/sql/*.sql и дописываются в миграцию скриптом
 // `pnpm db:migration <name>`. Их наличие проверяет tests/db/constraints.spec.ts.
 //
-// Версия Prisma зафиксирована на 6.x: в 7.x строка подключения переезжает
-// в prisma.config.ts, и смешивать инструкции двух мажоров нельзя.
+// Prisma зафиксирована на 7.9.1 (все три пакета в одной версии). В 7.x строка
+// подключения живёт в prisma.config.ts, а не в datasource, и клиент работает
+// через driver adapter вместо Rust-движка — из образа уходит бинарник движка.
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ---------------------------------------------------------------- enums
