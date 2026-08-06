@@ -168,12 +168,27 @@ export async function createAppointment(input: CreateAppointmentInput) {
     if (!notificationsDisabled()) {
       // Вне транзакции: воркер не должен увидеть задачу раньше, чем запись
       // станет видимой другим соединениям.
-      await enqueueReminder(
-        appointment.id,
-        appointment.startsAt,
-        organization.reminderOffsetMinutes,
-        now,
-      );
+      //
+      // Ошибка постановки не отменяет запись: она уже создана и зафиксирована,
+      // а недоступный Redis — не повод говорить администратору «не получилось»
+      // и провоцировать повторную попытку, которая упрётся в занятый слот.
+      // Напоминание при этом не потеряется совсем: NotificationLog помнит,
+      // что оно запланировано, и воркер может добрать такие записи.
+      try {
+        await enqueueReminder(
+          appointment.id,
+          appointment.startsAt,
+          organization.reminderOffsetMinutes,
+          now,
+        );
+      } catch (error) {
+        console.error(`Не удалось поставить напоминание по записи ${appointment.id}`, error);
+
+        await prisma.notificationLog.updateMany({
+          where: { appointmentId: appointment.id, type: "REMINDER_2H" },
+          data: { status: "FAILED", lastError: String(error) },
+        });
+      }
     }
 
     return appointment;

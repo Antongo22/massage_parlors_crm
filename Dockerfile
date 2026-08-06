@@ -19,6 +19,14 @@ FROM base AS dev
 ENV NODE_ENV=development
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
+
+# Снимок зависимостей и хеш lock-файла, под который он собран. Entrypoint
+# восстанавливает из него том, не обращаясь к реестру: образ уже собран
+# ровно под этот lock, качать заново нечего — и `docker compose up`
+# перестаёт зависеть от доступности npm.
+RUN cp -a /app/node_modules /opt/node_modules \
+ && md5sum package-lock.json | cut -d' ' -f1 > /opt/deps-lock-hash
+
 COPY docker/dev-entrypoint.sh /usr/local/bin/dev-entrypoint.sh
 RUN chmod +x /usr/local/bin/dev-entrypoint.sh
 # Entrypoint досинхронизирует node_modules в томе, если package-lock изменился.

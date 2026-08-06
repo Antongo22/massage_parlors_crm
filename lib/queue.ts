@@ -72,7 +72,10 @@ export function getMaintenanceQueue(): Queue<MaintenanceJob> {
  * Идентификатор задачи выводится из записи, а не генерируется случайно.
  * Благодаря этому повторная постановка не создаёт второе напоминание,
  * а отмена находит задачу, не храня её id где-то ещё.
+ *
+ * Разделитель — дефис, а не двоеточие: BullMQ отвергает двоеточие
+ * в пользовательских id, потому что сам строит им ключи Redis.
  */
 export function reminderJobId(appointmentId: string): string {
-  return `reminder:${appointmentId}`;
+  return `reminder-${appointmentId}`;
 }
