@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
-import { formatMoney, pluralize, SESSION_FORMS, VISIT_FORMS } from "@/lib/domain/money";
+import { formatMoney, pluralize, SESSION_FORMS } from "@/lib/domain/money";
 import { formatLocalDateTime } from "@/lib/domain/time";
 import { SOURCE_LABELS } from "@/lib/domain/client";
 import { getClientCard } from "@/lib/services/clients";

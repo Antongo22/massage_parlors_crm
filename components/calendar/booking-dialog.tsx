@@ -62,38 +62,49 @@ export function BookingDialog({
   const [paymentMode, setPaymentMode] = useState<"CASH_OR_CARD" | "SUBSCRIPTION">("CASH_OR_CARD");
   const [loading, startLoading] = useTransition();
 
-  const [state, action, pending] = useActionState<BookingState, FormData>(bookAppointment, {});
+  // Закрытие — следствие успешного действия, поэтому делается в самом
+  // действии, а не эффектом на state.ok: setState синхронно внутри эффекта
+  // вызывает лишний каскад рендеров.
+  const [state, action, pending] = useActionState<BookingState, FormData>(
+    async (previous, formData) => {
+      const result = await bookAppointment(previous, formData);
+
+      if (result.ok) {
+        setOpen(false);
+        setSelectedSlot(null);
+      }
+
+      return result;
+    },
+    {},
+  );
 
   const service = services.find((item) => item.id === serviceId);
 
-  useEffect(() => {
-    if (state.ok) {
-      setOpen(false);
-      setSelectedSlot(null);
-    }
-  }, [state.ok]);
-
   // Слоты зависят от услуги (её длительности), мастера и даты — пересчитываем
-  // при изменении любого из трёх.
+  // при изменении любого из трёх. Сброс выбранного слота идёт внутри перехода,
+  // а не синхронно в теле эффекта: иначе форма перерисовывается дважды.
   useEffect(() => {
     if (!open || !serviceId || !masterId || !date) return;
 
-    setSelectedSlot(null);
-
     startLoading(async () => {
-      setSlots(await fetchFreeSlots({ masterId, serviceId, date }));
+      const next = await fetchFreeSlots({ masterId, serviceId, date });
+
+      // Ранее выбранное время могло исчезнуть из новой выдачи —
+      // безопаснее заставить выбрать заново, чем отправить неактуальный слот.
+      setSelectedSlot(null);
+      setSlots(next);
     });
   }, [open, serviceId, masterId, date]);
 
   // Абонементы зависят от пары клиент+услуга: пакет действует на одну услугу.
   useEffect(() => {
-    if (!open || !clientId || !serviceId) {
-      setSubscriptions([]);
-      return;
-    }
+    if (!open) return;
 
     startLoading(async () => {
-      const usable = await fetchUsableSubscriptions(clientId, serviceId);
+      const usable =
+        clientId && serviceId ? await fetchUsableSubscriptions(clientId, serviceId) : [];
+
       setSubscriptions(usable);
 
       // Есть подходящий абонемент — предлагаем его по умолчанию: иначе

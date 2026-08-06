@@ -62,3 +62,29 @@ EXPOSE 3000
 ENV PORT=3000 HOSTNAME=0.0.0.0
 
 CMD ["node", "server.js"]
+
+# --- воркер ------------------------------------------------------------------
+# Отдельная стадия, а не runner: standalone-сборка Next включает только то,
+# что нужно веб-серверу, а воркер в неё не входит вовсе. Бандлить его тоже
+# нельзя — BullMQ грузит lua-скрипты с диска, и сборка их теряет.
+#
+# Поэтому здесь полные node_modules и запуск через tsx. Образ больше,
+# зато воркер работает тем же кодом, что в разработке, без второй сборки.
+FROM base AS worker
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json prisma.config.ts ./
+COPY prisma ./prisma
+COPY lib ./lib
+COPY worker ./worker
+COPY --from=builder /app/generated ./generated
+
+RUN addgroup --system --gid 1001 nodejs \
+ && adduser --system --uid 1001 nodejs \
+ && chown -R nodejs:nodejs /app
+
+USER nodejs
+
+CMD ["npm", "run", "worker"]

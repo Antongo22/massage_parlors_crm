@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { refundSubscription, type SubscriptionActionState } from "@/app/(admin)/subscriptions/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,14 +26,19 @@ export function RefundDialog({
   currency: string;
 }) {
   const [open, setOpen] = useState(false);
+  // Диалог закрывается прямо в действии, а не эффектом на state.ok.
+  // setState синхронно внутри эффекта вызывает лишний каскад рендеров,
+  // и правило react-hooks/set-state-in-effect ругается справедливо:
+  // закрытие — следствие успешного действия, а не синхронизация с внешним миром.
   const [state, action, pending] = useActionState<SubscriptionActionState, FormData>(
-    refundSubscription,
+    async (previous, formData) => {
+      const result = await refundSubscription(previous, formData);
+      if (result.ok) setOpen(false);
+      return result;
+    },
     {},
   );
 
-  useEffect(() => {
-    if (state.ok) setOpen(false);
-  }, [state.ok]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

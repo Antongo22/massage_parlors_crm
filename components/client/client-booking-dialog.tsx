@@ -65,26 +65,33 @@ export function ClientBookingDialog({
   const [paymentMode, setPaymentMode] = useState<"CASH_OR_CARD" | "SUBSCRIPTION">("CASH_OR_CARD");
   const [loading, startLoading] = useTransition();
 
+  // Закрытие делается в самом действии, а не эффектом на state.ok:
+  // setState синхронно внутри эффекта вызывает лишний каскад рендеров.
   const [state, action, pending] = useActionState<ClientBookingState, FormData>(
-    bookOwnAppointment,
+    async (previous, formData) => {
+      const result = await bookOwnAppointment(previous, formData);
+
+      if (result.ok) {
+        setOpen(false);
+        setSelectedSlot(null);
+      }
+
+      return result;
+    },
     {},
   );
 
   const service = services.find((item) => item.id === serviceId);
 
   useEffect(() => {
-    if (state.ok) {
-      setOpen(false);
-      setSelectedSlot(null);
-    }
-  }, [state.ok]);
-
-  useEffect(() => {
     if (!open || !serviceId || !masterId) return;
 
-    setSelectedSlot(null);
     startLoading(async () => {
-      setSlots(await fetchClientSlots({ masterId, serviceId, date }));
+      const next = await fetchClientSlots({ masterId, serviceId, date });
+
+      // Ранее выбранное время могло исчезнуть из новой выдачи.
+      setSelectedSlot(null);
+      setSlots(next);
     });
   }, [open, serviceId, masterId, date]);
 

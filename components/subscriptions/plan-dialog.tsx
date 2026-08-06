@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { savePlan, type SubscriptionActionState } from "@/app/(admin)/subscriptions/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,11 +41,19 @@ export function PlanDialog({
   const [serviceId, setServiceId] = useState(plan?.serviceId ?? services[0]?.id ?? "");
   const [sessions, setSessions] = useState(plan?.sessionsCount ?? 5);
   const [price, setPrice] = useState(plan ? Number(minorToInput(plan.priceMinor)) : 0);
-  const [state, action, pending] = useActionState<SubscriptionActionState, FormData>(savePlan, {});
+  // Диалог закрывается прямо в действии, а не эффектом на state.ok.
+  // setState синхронно внутри эффекта вызывает лишний каскад рендеров,
+  // и правило react-hooks/set-state-in-effect ругается справедливо:
+  // закрытие — следствие успешного действия, а не синхронизация с внешним миром.
+  const [state, action, pending] = useActionState<SubscriptionActionState, FormData>(
+    async (previous, formData) => {
+      const result = await savePlan(previous, formData);
+      if (result.ok) setOpen(false);
+      return result;
+    },
+    {},
+  );
 
-  useEffect(() => {
-    if (state.ok) setOpen(false);
-  }, [state.ok]);
 
   const service = services.find((item) => item.id === serviceId);
   const fullPrice = service ? service.priceMinor * sessions : 0;

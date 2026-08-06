@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { Ticket } from "lucide-react";
 import {
   sellSubscriptionAction,
@@ -40,14 +40,19 @@ export function SellSubscriptionDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [planId, setPlanId] = useState(plans[0]?.id ?? "");
+  // Диалог закрывается прямо в действии, а не эффектом на state.ok.
+  // setState синхронно внутри эффекта вызывает лишний каскад рендеров,
+  // и правило react-hooks/set-state-in-effect ругается справедливо:
+  // закрытие — следствие успешного действия, а не синхронизация с внешним миром.
   const [state, action, pending] = useActionState<SubscriptionActionState, FormData>(
-    sellSubscriptionAction,
+    async (previous, formData) => {
+      const result = await sellSubscriptionAction(previous, formData);
+      if (result.ok) setOpen(false);
+      return result;
+    },
     {},
   );
 
-  useEffect(() => {
-    if (state.ok) setOpen(false);
-  }, [state.ok]);
 
   const plan = plans.find((item) => item.id === planId);
   const discount = plan

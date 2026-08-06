@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { saveClient, type ClientActionState } from "@/app/(admin)/clients/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,11 +35,19 @@ export function ClientDialog({
   trigger: React.ReactElement;
 }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState<ClientActionState, FormData>(saveClient, {});
+  // Диалог закрывается прямо в действии, а не эффектом на state.ok.
+  // setState синхронно внутри эффекта вызывает лишний каскад рендеров,
+  // и правило react-hooks/set-state-in-effect ругается справедливо:
+  // закрытие — следствие успешного действия, а не синхронизация с внешним миром.
+  const [state, action, pending] = useActionState<ClientActionState, FormData>(
+    async (previous, formData) => {
+      const result = await saveClient(previous, formData);
+      if (result.ok) setOpen(false);
+      return result;
+    },
+    {},
+  );
 
-  useEffect(() => {
-    if (state.ok) setOpen(false);
-  }, [state.ok]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

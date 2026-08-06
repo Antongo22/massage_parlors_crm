@@ -1,0 +1,24 @@
+# Caddy получает и продлевает сертификат Let's Encrypt сам.
+# Ни cron, ни отдельного шага в инструкции по развёртыванию не нужно.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Чат работает через Server-Sent Events. Буферизация ответа копила бы
+	# сообщения в прокси и отдавала пачками — поток должен идти как есть.
+	reverse_proxy app:3000 {
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
