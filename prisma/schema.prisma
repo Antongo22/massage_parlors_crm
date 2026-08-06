@@ -1,0 +1,597 @@
+// Даталогическая модель описана в docs/data-model.md
+//
+// Ограничения, которые Prisma не декларирует (EXCLUDE, CHECK, функциональные
+// индексы), живут в prisma/sql/*.sql и дописываются в миграцию скриптом
+// `pnpm db:migration <name>`. Их наличие проверяет tests/db/constraints.spec.ts.
+//
+// Версия Prisma зафиксирована на 6.x: в 7.x строка подключения переезжает
+// в prisma.config.ts, и смешивать инструкции двух мажоров нельзя.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum Role {
+  ADMIN
+  CLIENT
+}
+
+enum ClientSource {
+  WALK_IN
+  REFERRAL
+  SOCIAL
+  SEARCH
+  OTHER
+}
+
+enum NoteType {
+  CONTRAINDICATION
+  PREFERENCE
+  GENERAL
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+enum PaymentMode {
+  CASH_OR_CARD
+  SUBSCRIPTION
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXHAUSTED
+  EXPIRED
+  REFUNDED
+}
+
+enum UsageState {
+  RESERVED
+  CONSUMED
+  REVERTED
+}
+
+enum PaymentKind {
+  SALE
+  REFUND
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+}
+
+enum NotificationType {
+  REMINDER_2H
+  BOOKING_CONFIRMED
+  CANCELLED
+  SUBSCRIPTION_EXPIRING
+}
+
+enum NotificationChannel {
+  EMAIL
+}
+
+enum NotificationStatus {
+  SCHEDULED
+  SENT
+  FAILED
+  CANCELLED
+}
+
+// ------------------------------------------------- организация и настройки
+
+/// Синглтон (уникальный индекс по константе). Пока setupCompletedAt = null,
+/// приложение редиректит все маршруты на /setup.
+/// Инсталляция single-tenant: organizationId в других таблицах намеренно нет.
+model Organization {
+  id                      String    @id @default(cuid())
+  name                    String
+  timezone                String    @default("Europe/Moscow")
+  currency                String    @default("RUB")
+  slotStepMinutes         Int       @default(15)
+  /// Текущее значение для НОВЫХ записей. Созданные записи хранят
+  /// собственный bufferMinutesSnapshot — см. Appointment.
+  bufferMinutes           Int       @default(0)
+  minLeadTimeMinutes      Int       @default(120)
+  cancellationWindowHours Int       @default(12)
+  reminderOffsetMinutes   Int       @default(120)
+  /// Списывать ли сеанс абонемента при неявке. По умолчанию да: слот был
+  /// выкуплен и потерян. Вынесено в настройку, объясняется в wizard.
+  chargeSubscriptionOnNoShow Boolean @default(true)
+  setupCompletedAt        DateTime? @db.Timestamptz
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ------------------------------------------------------------ auth (next-auth)
+
+model User {
+  id            String    @id @default(cuid())
+  /// Хранится нормализованным. Уникальность по-настоящему обеспечивает
+  /// функциональный индекс по lower(btrim(email)): обычный UNIQUE считает
+  /// User@Example.com и user@example.com разными строками.
+  /// @unique оставлен сознательно, а не по недосмотру — он нужен адаптеру
+  /// Auth.js и findUnique({ where: { email } }). Избыточность дешёвая:
+  /// таблица пользователей маленькая, второй индекс незаметен.
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  role          Role      @default(CLIENT)
+  isActive      Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts              Account[]
+  sessions              Session[]
+  client                Client?
+  master                Master?
+  authoredNotes         ClientNote[]  @relation("NoteAuthor")
+  createdAppointments   Appointment[] @relation("AppointmentCreator")
+  cancelledAppointments Appointment[] @relation("AppointmentCanceller")
+  messages              Message[]
+  auditLogs             AuditLog[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// -------------------------------------------------------- мастера и график
+
+model Master {
+  id             String  @id @default(cuid())
+  userId         String? @unique
+  displayName    String
+  specialization String?
+  color          String?
+  isActive       Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  workingHours WorkingHours[]
+  timeOff      TimeOff[]
+  appointments Appointment[]
+}
+
+/// Регулярный недельный график. Минуты от полуночи по локальному времени салона —
+/// не TIMESTAMPTZ, чтобы график не «поехал» при переходе на летнее время.
+/// Строка неизменяема: правка графика = удаление + вставка, поэтому updatedAt нет.
+///
+/// Пересечение смен одного дня запрещает EXCLUDE-констрейнт (prisma/sql):
+/// @@unique ниже защищает только от совпадающего начала и пропустил бы
+/// пару 09:00–13:00 / 10:00–18:00, из-за которой генератор слотов вернул бы
+/// часть времени дважды. Две смены в день при этом остаются разрешены.
+model WorkingHours {
+  id          String @id @default(cuid())
+  masterId    String
+  weekday     Int    @db.SmallInt // 0 = воскресенье
+  startMinute Int    @db.SmallInt
+  endMinute   Int    @db.SmallInt
+
+  createdAt DateTime @default(now())
+
+  master Master @relation(fields: [masterId], references: [id], onDelete: Cascade)
+
+  @@unique([masterId, weekday, startMinute])
+}
+
+model TimeOff {
+  id       String   @id @default(cuid())
+  masterId String
+  startsAt DateTime @db.Timestamptz
+  endsAt   DateTime @db.Timestamptz
+  reason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  master Master @relation(fields: [masterId], references: [id], onDelete: Cascade)
+
+  @@index([masterId, startsAt, endsAt])
+}
+
+// ---------------------------------------------------------- каталог услуг
+
+model ServiceCategory {
+  id        String @id @default(cuid())
+  name      String @unique
+  slug      String @unique
+  sortOrder Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  services Service[]
+}
+
+model Service {
+  id              String  @id @default(cuid())
+  categoryId      String
+  name            String
+  slug            String  @unique
+  description     String?
+  durationMinutes Int
+  priceMinor      Int
+  isActive        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category      ServiceCategory    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  appointments  Appointment[]
+  plans         SubscriptionPlan[]
+  subscriptions Subscription[]
+
+  @@index([categoryId, isActive])
+}
+
+// -------------------------------------------------------------- клиенты
+
+model Client {
+  id         String        @id @default(cuid())
+  userId     String?       @unique
+  lastName   String
+  firstName  String
+  middleName String?
+  /// Хранится в E.164 (+79991234567), формат проверяется CHECK-ограничением:
+  /// иначе «+7 999 123-45-67» и «89991234567» создадут двух клиентов.
+  phone      String        @unique
+  /// Уникален по lower(btrim(email)) среди неархивированных: используется
+  /// для связывания карточки с User при первом входе.
+  email      String?
+  birthDate  DateTime?     @db.Date
+  source     ClientSource?
+  /// Денормализация ради фильтров в списке; пересчитывается доменным слоем.
+  noShowCount Int          @default(0)
+  archivedAt DateTime?     @db.Timestamptz
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  notes         ClientNote[]
+  appointments  Appointment[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  conversation  Conversation?
+
+  @@index([lastName, firstName])
+  @@index([archivedAt])
+}
+
+model ClientNote {
+  id           String   @id @default(cuid())
+  clientId     String
+  authorUserId String?
+  type         NoteType
+  body         String
+  isPinned     Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  author User?  @relation("NoteAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([clientId, type])
+}
+
+// ------------------------------------------------------------- записи
+
+model Appointment {
+  id        String   @id @default(cuid())
+  clientId  String
+  masterId  String
+  serviceId String
+  startsAt  DateTime @db.Timestamptz
+  /// Конец сеанса для клиента. CHECK: = startsAt + durationMinutesSnapshot.
+  endsAt    DateTime @db.Timestamptz
+  /// Конец занятости мастера с учётом технического перерыва.
+  /// CHECK: = endsAt + bufferMinutesSnapshot.
+  /// Именно этот интервал защищает EXCLUDE-констрейнт: если бы он закрывал
+  /// только [startsAt, endsAt), перерыв соблюдался бы лишь доброй волей
+  /// приложения — то есть до первого конкурентного запроса.
+  blockedUntil DateTime @db.Timestamptz
+
+  status AppointmentStatus @default(PENDING)
+
+  /// Снимки на момент записи: изменение прайса или настроек салона
+  /// не должно переписывать прошлую выручку и перекраивать расписание.
+  serviceNameSnapshot     String
+  priceMinorSnapshot      Int
+  durationMinutesSnapshot Int
+  bufferMinutesSnapshot   Int
+
+  paymentMode PaymentMode
+
+  clientComment String?
+  internalNote  String?
+
+  cancelReason      String?
+  cancelledAt       DateTime? @db.Timestamptz
+  cancelledByUserId String?
+  completedAt       DateTime? @db.Timestamptz
+  /// Отдельное поле, чтобы момент неявки не приходилось выковыривать
+  /// из updatedAt или аудита.
+  noShowAt          DateTime? @db.Timestamptz
+  createdByUserId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client        Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  master        Master             @relation(fields: [masterId], references: [id], onDelete: Restrict)
+  service       Service            @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  createdBy     User?              @relation("AppointmentCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  cancelledBy   User?              @relation("AppointmentCanceller", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  usage         SubscriptionUsage?
+  payments      Payment[]
+  notifications NotificationLog[]
+
+  @@index([masterId, startsAt])
+  @@index([clientId, startsAt(sort: Desc)])
+  @@index([status, startsAt])
+}
+
+// ---------------------------------------------------------- абонементы
+
+model SubscriptionPlan {
+  id            String  @id @default(cuid())
+  serviceId     String
+  name          String
+  sessionsCount Int
+  /// Цена пакета со скидкой. Процент скидки не хранится — он производный
+  /// от priceMinor и текущей цены услуги.
+  priceMinor    Int
+  validityDays  Int     @default(180)
+  isActive      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  service       Service        @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id       String @id @default(cuid())
+  clientId String
+  planId   String
+  /// Настоящий FK, а не строковый снимок: услуги физически не удаляются,
+  /// поэтому связь ничему не мешает и даёт нормальный join для аналитики.
+  /// Историческое название фиксируется отдельным снимком.
+  serviceId           String
+  serviceNameSnapshot String
+
+  sessionsTotal  Int
+  pricePaidMinor Int
+  purchasedAt    DateTime @db.Timestamptz
+  expiresAt      DateTime @db.Timestamptz
+
+  /// Денормализация (как noShowCount) ради индексируемой выборки
+  /// «активные абонементы» на дашборде. Источник правды при резервировании —
+  /// вычисляемый остаток по журналу usages, а не это поле.
+  /// EXHAUSTED ставится после последнего CONSUMED, не после RESERVED:
+  /// иначе зарезервированный, но не состоявшийся визит показывал бы
+  /// абонемент использованным, а отмена «воскрешала» бы его.
+  status SubscriptionStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client        Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  plan          SubscriptionPlan    @relation(fields: [planId], references: [id], onDelete: Restrict)
+  service       Service             @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  usages        SubscriptionUsage[]
+  payments      Payment[]
+  notifications NotificationLog[]
+
+  @@index([clientId, status])
+  @@index([status, expiresAt])
+}
+
+/// Журнал списаний. Остатка как поля нет — он вычисляется:
+/// sessionsTotal − count(usages where state in (RESERVED, CONSUMED)).
+///
+/// Согласованность state и меток времени обеспечивает CHECK (prisma/sql) —
+/// по тому же принципу, что и у Appointment. У REVERTED поле consumedAt
+/// свободно: откатить можно и резерв, и уже потреблённое списание.
+model SubscriptionUsage {
+  id             String     @id @default(cuid())
+  subscriptionId String
+  /// UNIQUE: один визит — не более одного списания (защита от двойного
+  /// списания при повторной отправке формы или ретрае задачи).
+  appointmentId  String     @unique
+  state          UsageState
+  reservedAt     DateTime   @db.Timestamptz
+  consumedAt     DateTime?  @db.Timestamptz
+  revertedAt     DateTime?  @db.Timestamptz
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  appointment  Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId, state])
+}
+
+// -------------------------------------------------------------- финансы
+
+/// Append-only журнал денежных движений (потому updatedAt нет: возврат —
+/// новая строка, а не правка старой). Выручка не считается суммой по записям:
+/// абонемент оплачивается один раз, а визитов по нему несколько.
+model Payment {
+  id             String  @id @default(cuid())
+  clientId       String
+  /// Ровно один из двух субъектов заполнен — CHECK-ограничение XOR.
+  appointmentId  String?
+  subscriptionId String?
+  /// Какую продажу отменяет возврат. Без этой ссылки возврат — просто
+  /// отрицательное число в отчёте, по которому нельзя сверить кассу.
+  refundedPaymentId String?
+
+  kind        PaymentKind
+  /// Всегда положительная; знак задаёт kind.
+  amountMinor Int
+  method      PaymentMethod
+  paidAt      DateTime      @db.Timestamptz
+  comment     String?
+
+  createdAt DateTime @default(now())
+
+  /// Restrict, а не SetNull: обнуление ссылки при удалении визита оставило бы
+  /// обе ссылки пустыми и нарушило XOR-констрейнт. То есть SetNull здесь
+  /// фактически работал бы как запрет, но падал бы с невнятной ошибкой про
+  /// CHECK вместо внятной про внешний ключ. Сущность, к которой привязано
+  /// денежное движение, физически не удаляется — так и записываем.
+  client          Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  appointment     Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  refundedPayment Payment?      @relation("PaymentRefund", fields: [refundedPaymentId], references: [id], onDelete: Restrict)
+  refunds         Payment[]     @relation("PaymentRefund")
+
+  @@index([paidAt])
+  @@index([clientId, paidAt])
+  @@index([refundedPaymentId])
+}
+
+// ---------------------------------------------------------- уведомления
+
+/// Субъект зависит от типа: напоминания относятся к визиту, предупреждение
+/// о сгорающем абонементе — к абонементу. Соответствие типа и субъекта
+/// проверяет CHECK notification_subject_valid (prisma/sql).
+///
+/// Идемпотентности здесь НЕТ составного @@unique — он был бы бесполезен для
+/// абонементных строк: в PostgreSQL NULL <> NULL, поэтому строки с пустым
+/// appointmentId не конфликтуют между собой, и защита от повторного письма
+/// исчезла бы молча. Вместо него два частичных уникальных индекса в prisma/sql.
+model NotificationLog {
+  id             String              @id @default(cuid())
+  appointmentId  String?
+  subscriptionId String?
+  type           NotificationType
+  channel        NotificationChannel
+  status         NotificationStatus
+  scheduledFor   DateTime            @db.Timestamptz
+  sentAt         DateTime?           @db.Timestamptz
+  /// Счётчик и последняя ошибка вместо отдельной таблицы попыток:
+  /// историю ретраев и стек-трейсы уже хранит BullMQ в Redis.
+  attempts       Int                 @default(0)
+  lastError      String?
+  /// ID задачи BullMQ — нужен, чтобы снять напоминание при отмене/переносе.
+  jobId          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointment  Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+}
+
+// -------------------------------------------------------------------- чат
+
+model Conversation {
+  id            String    @id @default(cuid())
+  clientId      String    @unique
+  lastMessageAt DateTime? @db.Timestamptz
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client   Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([lastMessageAt(sort: Desc)])
+}
+
+/// Текст и автор неизменяемы; единственное допустимое изменение строки —
+/// установка readAt, значением которой updatedAt и был бы. Отдельная сущность
+/// прочтений нужна в групповых чатах; здесь сторон всегда две.
+model Message {
+  id             String    @id @default(cuid())
+  conversationId String
+  senderUserId   String?
+  /// Снимок роли: сообщение остаётся «от салона», даже если учётка удалена.
+  senderRole     Role
+  body           String
+  readAt         DateTime? @db.Timestamptz
+
+  createdAt DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User?        @relation(fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt(sort: Desc)])
+}
+
+// ------------------------------------------------------------------ аудит
+
+/// Append-only. Только для сущностей, вокруг которых возникают споры:
+/// записи, абонементы, деньги.
+model AuditLog {
+  id          String  @id @default(cuid())
+  actorUserId String?
+  entity      String
+  entityId    String
+  action      String
+  diff        Json?
+
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId, createdAt(sort: Desc)])
+}
