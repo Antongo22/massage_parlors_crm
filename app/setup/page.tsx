@@ -1,13 +1,51 @@
+import { WizardShell } from "@/components/setup/wizard-shell";
+import { StepMail } from "@/components/setup/step-mail";
+import { StepOrganization } from "@/components/setup/step-organization";
+import { StepSchedule } from "@/components/setup/step-schedule";
+import { catalogIsEmpty } from "@/lib/services/demo-catalog";
+import { getSetupState } from "@/lib/services/setup";
+
 export const dynamic = "force-dynamic";
 
-export default function SetupPage() {
+const COPY = {
+  1: {
+    title: "Расскажите о салоне",
+    description:
+      "Название, часовой пояс и учётная запись администратора. Займёт меньше минуты.",
+  },
+  2: {
+    title: "Когда вы работаете",
+    description:
+      "График мастера и правила записи. По ним система будет считать свободные слоты.",
+  },
+  3: {
+    title: "Письма клиентам",
+    description:
+      "Напоминания о сеансе и ссылки для входа уходят по почте. Проверим, что она работает.",
+  },
+} as const;
+
+export default async function SetupPage() {
+  const state = await getSetupState();
+  const copy = COPY[state.step];
+
   return (
-    <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-4 p-8">
-      <h1 className="text-2xl font-semibold">Первичная настройка</h1>
-      <p className="text-muted-foreground text-sm">
-        Мастер настройки в разработке: здесь будут создание администратора, данные салона,
-        рабочие часы, SMTP и опциональные демо-данные.
-      </p>
-    </main>
+    <WizardShell step={state.step} title={copy.title} description={copy.description}>
+      {state.step === 1 && <StepOrganization />}
+
+      {state.step === 2 && (
+        // В частном салоне администратор и мастер обычно один человек,
+        // поэтому имя подставляется — но остаётся редактируемым.
+        <StepSchedule defaultMasterName={state.masterName ?? state.adminName ?? ""} />
+      )}
+
+      {state.step === 3 && (
+        <StepMail
+          adminEmail={state.adminEmail}
+          catalogIsEmpty={await catalogIsEmpty()}
+          envMailConfigured={Boolean(process.env.SMTP_HOST)}
+        />
+      )}
+    </WizardShell>
   );
 }

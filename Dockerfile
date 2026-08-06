@@ -19,6 +19,11 @@ FROM base AS dev
 ENV NODE_ENV=development
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
+COPY docker/dev-entrypoint.sh /usr/local/bin/dev-entrypoint.sh
+RUN chmod +x /usr/local/bin/dev-entrypoint.sh
+# Entrypoint досинхронизирует node_modules в томе, если package-lock изменился.
+# Применяется и к app, и к migrate: у обоих один том зависимостей.
+ENTRYPOINT ["/usr/local/bin/dev-entrypoint.sh"]
 # -H 0.0.0.0: по умолчанию сервер слушал бы только внутренний интерфейс
 # контейнера и был бы недоступен с хоста.
 CMD ["npm", "run", "dev", "--", "-H", "0.0.0.0"]
