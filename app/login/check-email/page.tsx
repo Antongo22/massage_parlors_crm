@@ -36,7 +36,7 @@ export default async function CheckEmailPage({
       </p>
 
       {/* Base UI использует render вместо asChild из старого shadcn */}
-      <Button render={<Link href="/login" />} variant="outline" className="mt-8">
+      <Button render={<Link href="/login" />} nativeButton={false} variant="outline" className="mt-8">
         Ввести другой адрес
       </Button>
     </main>

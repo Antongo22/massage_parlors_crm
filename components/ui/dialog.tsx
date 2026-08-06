@@ -11,8 +11,18 @@ function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
 
+// data-slot на триггере намеренно НЕ ставится.
+//
+// Триггер почти всегда рендерится через render={<Button />}, и тогда на одном
+// DOM-узле оказываются два data-slot: свой и кнопочный. Base UI сливает пропсы
+// в разном порядке на сервере и при гидратации — сервер отдавал
+// "dialog-trigger", клиент рисовал "button", React ругался на несовпадение
+// дерева. Победитель тут не важен, важно чтобы значение было одно.
+//
+// Ничего не теряем: селекторов по этому значению в проекте нет,
+// атрибут служит отладочной меткой, и "button" её роль выполняет.
 function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
-  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />
+  return <DialogPrimitive.Trigger {...props} />
 }
 
 function DialogPortal({ ...props }: DialogPrimitive.Portal.Props) {

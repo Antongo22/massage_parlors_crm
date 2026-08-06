@@ -14,8 +14,10 @@ function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {
   return <MenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />
 }
 
+// data-slot не ставим по той же причине, что в dialog.tsx: конфликт
+// с кнопкой из render={} ломает гидратацию.
 function DropdownMenuTrigger({ ...props }: MenuPrimitive.Trigger.Props) {
-  return <MenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />
+  return <MenuPrimitive.Trigger {...props} />
 }
 
 function DropdownMenuContent({

@@ -78,7 +78,7 @@ export default async function ClientCardPage({ params }: { params: Promise<{ id:
               servicePriceMinor: plan.service.priceMinor,
             }))}
           />
-          <Button render={<Link href={`/calendar?clientId=${client.id}`} />}>
+          <Button render={<Link href={`/calendar?clientId=${client.id}`} />} nativeButton={false}>
             <CalendarPlus className="size-4" />
             Записать
           </Button>

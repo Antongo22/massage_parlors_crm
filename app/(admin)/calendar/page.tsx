@@ -92,12 +92,13 @@ export default async function CalendarPage({
           variant="outline"
           size="icon-sm"
           render={<Link href={`/calendar?date=${shiftLocalDate(date, -1)}`} />}
+          nativeButton={false}
           aria-label="Предыдущий день"
         >
           <ChevronLeft className="size-4" />
         </Button>
 
-        <Button variant="outline" size="sm" render={<Link href="/calendar" />}>
+        <Button variant="outline" size="sm" render={<Link href="/calendar" />} nativeButton={false}>
           Сегодня
         </Button>
 
@@ -105,6 +106,7 @@ export default async function CalendarPage({
           variant="outline"
           size="icon-sm"
           render={<Link href={`/calendar?date=${shiftLocalDate(date, 1)}`} />}
+          nativeButton={false}
           aria-label="Следующий день"
         >
           <ChevronRight className="size-4" />
@@ -117,6 +119,7 @@ export default async function CalendarPage({
               variant={day === date ? "default" : "ghost"}
               size="sm"
               render={<Link href={`/calendar?date=${day}`} />}
+              nativeButton={false}
             >
               {new Date(day).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
             </Button>

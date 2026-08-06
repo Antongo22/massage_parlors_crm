@@ -99,10 +99,11 @@ services:
       # соответствующие каталоги бинда.
       - node-modules:/app/node_modules
       - generated-client:/app/generated
-      # Кеш сборки тоже контейнерный: иначе результат `npm run build` на хосте
-      # и инкрементальный кеш Turbopack в контейнере перетирают друг друга,
-      # а падает это потом в виде необъяснимого «Can't resolve ...».
-      - next-cache:/app/.next
+      # Тома на /app/.next здесь НЕТ и быть не должно. Он выглядит логично
+      # (изолировать кеш сборки), но на macOS оставляет за собой каталог-точку
+      # монтирования, который потом не удаляется ни из контейнера, ни с хоста,
+      # и утягивает за собой доступ ко всей папке проекта.
+      # Правило вместо тома: сборку запускаем в Docker или в CI, а не на хосте.
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,4 +137,3 @@ volumes:
   redis-data:
   node-modules:
   generated-client:
-  next-cache:
