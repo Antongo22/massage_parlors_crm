@@ -23,8 +23,48 @@ declare module "next-auth" {
  * запросе: заблокированный администратор должен терять доступ немедленно,
  * а не когда истечёт срок его токена.
  */
+/**
+ * Адаптер, устойчивый к исчезнувшей сессии.
+ *
+ * Сценарий из жизни: разработчик выполняет `npm run db:seed`, тот очищает
+ * базу, а в браузере остаётся cookie от удалённой сессии. Auth.js при
+ * следующем входе пытается удалить старую строку, Prisma отвечает
+ * «record not found», и человек не может войти вообще никак, пока не
+ * почистит cookie вручную — при том что ошибка ни на что не указывает.
+ *
+ * Удаление того, чего нет, — это успех, а не ошибка.
+ */
+function resilientAdapter() {
+  const adapter = PrismaAdapter(prisma);
+  const ignoreMissing = async <T>(operation: Promise<T>): Promise<T | null> => {
+    try {
+      return await operation;
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+
+      if (code === "P2025") return null;
+      throw error;
+    }
+  };
+
+  return {
+    ...adapter,
+    // Возвращаем void: Auth.js результат удаления не использует, а сузить
+    // тип проще, чем городить объединение с null в сигнатуре адаптера.
+    deleteSession: async (sessionToken: string): Promise<void> => {
+      await ignoreMissing(Promise.resolve(adapter.deleteSession!(sessionToken)));
+    },
+    updateSession: async (
+      session: Parameters<NonNullable<typeof adapter.updateSession>>[0],
+    ): Promise<null> => {
+      await ignoreMissing(Promise.resolve(adapter.updateSession!(session)));
+      return null;
+    },
+  } satisfies typeof adapter;
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
+  adapter: resilientAdapter(),
   session: { strategy: "database" },
   pages: {
     signIn: "/login",

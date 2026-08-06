@@ -111,6 +111,26 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  worker:
+    # Напоминания и обслуживание абонементов. Отдельный процесс, а не поток
+    # внутри веб-сервера: перезапуск при деплое не должен гасить очередь,
+    # а долгая рассылка — занимать event loop, обслуживающий запросы.
+    build:
+      context: .
+      target: dev
+    restart: unless-stopped
+    environment: *app-env
+    volumes:
+      - .:/app
+      - node-modules:/app/node_modules
+      - generated-client:/app/generated
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: npm run worker
+
 volumes:
   postgres-data:
   redis-data:

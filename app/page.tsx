@@ -1,7 +1,8 @@
-export const dynamic = "force-dynamic";
-
 import { redirect } from "next/navigation";
+import { getSessionUser } from "@/lib/auth-guards";
 import { isSetupCompleted } from "@/lib/services/organization";
+
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   // Пока wizard не завершён, у приложения нет ни расписания, ни таймзоны,
@@ -10,5 +11,9 @@ export default async function HomePage() {
     redirect("/setup");
   }
 
-  redirect("/dashboard");
+  const user = await getSessionUser();
+
+  if (!user) redirect("/login");
+
+  redirect(user.role === "ADMIN" ? "/dashboard" : "/my");
 }

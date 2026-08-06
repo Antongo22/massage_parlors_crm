@@ -22,7 +22,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "worker": "tsx worker/index.ts"
+    "worker": "NODE_OPTIONS='--conditions=react-server' tsx worker/index.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
