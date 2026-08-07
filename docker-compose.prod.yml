@@ -1,0 +1,127 @@
+# Продакшн: `./deploy.sh` на чистой VPS поднимает всё под HTTPS.
+#
+# Отличия от локальной конфигурации:
+#   — образ собирается (target: runner), исходники не монтируются;
+#   — порты БД и Redis наружу не открыты: только внутренняя сеть;
+#   — TLS терминирует Caddy, сертификат получает сам через Let's Encrypt;
+#   — Mailpit нет: письма уходят через настоящий SMTP.
+
+name: massage-crm
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+  REDIS_URL: redis://redis:6379
+  AUTH_SECRET: ${AUTH_SECRET}
+  AUTH_URL: https://${DOMAIN}
+  AUTH_TRUST_HOST: "true"
+  # Значения по умолчанию для первого запуска. После wizard настройки почты
+  # берутся из базы, и менять их можно через интерфейс, не заходя на сервер.
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_SECURE: ${SMTP_SECURE:-false}
+  MAIL_FROM: ${MAIL_FROM:-}
+  NODE_ENV: production
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Каталог для дампов: скрипт бэкапа складывает их сюда.
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    restart: always
+    # appendonly: отложенные напоминания должны переживать рестарт,
+    # иначе клиенты молча не получат письма.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      target: runner
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Только deploy: dev-команды на проде недопустимы, они умеют ронять данные.
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: always
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      # Отдельная стадия: воркер не входит в standalone-сборку Next,
+      # а забандлить его нельзя — BullMQ грузит lua-скрипты с диска.
+      target: worker
+    restart: always
+    environment: *app-env
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    # Caddy, а не nginx + certbot: сертификат он получает и продлевает сам,
+    # без cron и без отдельного шага в инструкции по развёртыванию.
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:

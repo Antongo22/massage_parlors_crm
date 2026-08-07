@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # Новый пуш в ту же ветку отменяет предыдущий прогон: держать очередь
+  # из устаревших сборок незачем.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  quality:
+    name: Линт, типы, сборка
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # Клиент Prisma не коммитится, но без него не проходит проверка типов:
+      # доменный слой типизирован сгенерированными моделями.
+      - run: npx prisma generate
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm run build
+        env:
+          # Сборка не обращается к БД (все страницы с данными динамические),
+          # но переменная должна существовать, иначе падает инициализация клиента.
+          DATABASE_URL: postgresql://crm:crm@localhost:5432/crm?schema=public
+          AUTH_SECRET: ci-build-secret-not-used-at-runtime
+
+  tests:
+    name: Тесты домена и БД
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: crm
+          POSTGRES_PASSWORD: crm
+          POSTGRES_DB: crm
+        ports:
+          - 5432:5432
+        # Без healthcheck шаги стартуют раньше, чем Postgres начнёт принимать
+        # соединения, и миграции падают на пустом месте.
+        options: >-
+          --health-cmd "pg_isready -U crm"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://crm:crm@localhost:5432/crm?schema=public
+      TEST_DATABASE_URL: postgresql://crm:crm@localhost:5432/crm_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      AUTH_SECRET: ci-test-secret
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      # Тесты сами создают тестовую базу и накатывают миграции (global-setup),
+      # поэтому отдельного шага миграции здесь нет.
+      - run: npm test
+
+  e2e:
+    name: E2E, критический путь
+    runs-on: ubuntu-latest
+    # Ждём быстрые проверки: гонять браузерные тесты на заведомо сломанном
+    # коде — это пять лишних минут на каждый неудачный коммит.
+    needs: [quality, tests]
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: crm
+          POSTGRES_PASSWORD: crm
+          POSTGRES_DB: crm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crm"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      mailpit:
+        # Вход идёт по ссылке из письма, и тест читает его через API Mailpit.
+        # Так проверяется настоящая цепочка «форма → письмо → сессия».
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
+
+    env:
+      DATABASE_URL: postgresql://crm:crm@localhost:5432/crm?schema=public
+      REDIS_URL: redis://localhost:6379
+      AUTH_SECRET: ci-e2e-secret
+      AUTH_URL: http://localhost:3000
+      AUTH_TRUST_HOST: "true"
+      SMTP_HOST: localhost
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      MAIL_FROM: CRM <noreply@example.com>
+      E2E_BASE_URL: http://localhost:3000
+      MAILPIT_URL: http://localhost:8025
+      DISABLE_NOTIFICATIONS: "true"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      - run: npx prisma migrate deploy
+
+      - run: npm run build
+
+      - name: Запуск приложения
+        run: |
+          npm run start &
+          npx wait-on http://localhost:3000/login --timeout 60000
+
+      # Только headless-оболочка: полный Chromium в CI не нужен, а весит больше.
+      - run: npx playwright install --with-deps --only-shell chromium
+
+      - run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

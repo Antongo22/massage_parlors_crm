@@ -5,11 +5,11 @@
 # (EXCLUDE, CHECK, функциональные индексы), живут в prisma/sql/*.sql. Если
 # дописывать их в миграцию руками «по инструкции из README», рано или поздно
 # получится расхождение: sql-файл обновили, миграцию — забыли. Здесь вставка
-# автоматическая, а tests/db/constraints.spec.ts проверяет результат в CI.
+# автоматическая, а tests/db/constraints.*.spec.ts проверяет результат в CI.
 #
 # Использование:
-#   pnpm db:migration init                      # только schema.prisma
-#   pnpm db:migration init 0001_init_constraints # + ручной SQL
+#   npm run db:migration -- init                      # только schema.prisma
+#   npm run db:migration -- init 0001_init_constraints # + ручной SQL
 
 set -euo pipefail
 
@@ -17,11 +17,11 @@ MIGRATION_NAME="${1:-}"
 SQL_FILE="${2:-}"
 
 if [[ -z "$MIGRATION_NAME" ]]; then
-  echo "usage: pnpm db:migration <migration-name> [sql-file-in-prisma/sql]" >&2
+  echo "usage: npm run db:migration -- <migration-name> [sql-file-in-prisma/sql]" >&2
   exit 1
 fi
 
-pnpm prisma migrate dev --create-only --name "$MIGRATION_NAME"
+npx prisma migrate dev --create-only --name "$MIGRATION_NAME"
 
 MIGRATION_DIR=$(find prisma/migrations -maxdepth 1 -type d -name "*_${MIGRATION_NAME}" | sort | tail -n 1)
 
@@ -51,4 +51,4 @@ if [[ -n "$SQL_FILE" ]]; then
   echo "→ $SOURCE дописан в $MIGRATION_DIR/migration.sql"
 fi
 
-echo "→ проверьте $MIGRATION_DIR/migration.sql и примените: pnpm prisma migrate dev"
+echo "→ проверьте $MIGRATION_DIR/migration.sql и примените: npx prisma migrate dev"

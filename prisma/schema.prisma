@@ -4,16 +4,17 @@
 // индексы), живут в prisma/sql/*.sql и дописываются в миграцию скриптом
 // `pnpm db:migration <name>`. Их наличие проверяет tests/db/constraints.spec.ts.
 //
-// Версия Prisma зафиксирована на 6.x: в 7.x строка подключения переезжает
-// в prisma.config.ts, и смешивать инструкции двух мажоров нельзя.
+// Prisma зафиксирована на 7.9.1 (все три пакета в одной версии). В 7.x строка
+// подключения живёт в prisma.config.ts, а не в datasource, и клиент работает
+// через driver adapter вместо Rust-движка — из образа уходит бинарник движка.
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ---------------------------------------------------------------- enums
@@ -114,6 +115,19 @@ model Organization {
   chargeSubscriptionOnNoShow Boolean @default(true)
   setupCompletedAt        DateTime? @db.Timestamptz
 
+  /// Настройки почты. Задаются в wizard, потому что владелец салона должен
+  /// иметь возможность сменить их сам, не заходя по SSH на VPS. Если не
+  /// заданы, используются переменные окружения — это режим первого запуска.
+  smtpHost     String?
+  smtpPort     Int?
+  smtpUser     String?
+  /// AES-256-GCM, ключ выводится из AUTH_SECRET (см. lib/crypto.ts).
+  /// В открытом виде пароль в базе не лежит: дамп БД не должен давать
+  /// доступ к почтовому ящику салона.
+  smtpPassword String?
+  smtpSecure   Boolean @default(false)
+  mailFrom     String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -131,6 +145,9 @@ model User {
   email         String    @unique
   emailVerified DateTime?
   name          String?
+  /// Требование адаптера Auth.js: он создаёт пользователя с этим полем.
+  /// В домене не используется — аватаров у magic-link-входа нет.
+  image         String?
   role          Role      @default(CLIENT)
   isActive      Boolean   @default(true)
 
