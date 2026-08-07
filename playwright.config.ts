@@ -14,6 +14,8 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
+  // Сид перед прогоном: см. комментарий в самом файле.
+  globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   // Тесты меняют общие данные (записи, абонементы), поэтому один воркер:
   // параллельные прогоны отбирали бы друг у друга слоты в календаре.

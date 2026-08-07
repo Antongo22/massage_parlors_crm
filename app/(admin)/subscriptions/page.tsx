@@ -26,7 +26,7 @@ export default async function SubscriptionsPage() {
 
   const [plans, subscriptions, services] = await Promise.all([
     prisma.subscriptionPlan.findMany({
-      orderBy: [{ isActive: "desc" }, { sessionsCount: "asc" }],
+      orderBy: [{ isActive: "desc" }, { sessionsCount: "asc" }, { name: "asc" }],
       include: { service: { select: { name: true, priceMinor: true } }, _count: { select: { subscriptions: true } } },
     }),
     prisma.subscription.findMany({

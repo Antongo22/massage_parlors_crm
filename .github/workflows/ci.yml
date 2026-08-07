@@ -164,8 +164,6 @@ jobs:
 
       - run: npx prisma migrate deploy
 
-      - run: npm run db:seed
-
       - run: npm run build
 
       - name: Запуск приложения
@@ -173,7 +171,8 @@ jobs:
           npm run start &
           npx wait-on http://localhost:3000/login --timeout 60000
 
-      - run: npx playwright install --with-deps chromium
+      # Только headless-оболочка: полный Chromium в CI не нужен, а весит больше.
+      - run: npx playwright install --with-deps --only-shell chromium
 
       - run: npm run test:e2e
 

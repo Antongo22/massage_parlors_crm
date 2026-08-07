@@ -59,6 +59,9 @@ test.describe("критический путь администратора", ()
     await expect(row).toBeVisible();
     await expect(row.getByText("Подтверждена")).toBeVisible();
 
+    // Фамилия понадобится, чтобы найти платёж этого клиента в финансах.
+    const clientName = (await row.locator("a").first().textContent())!.trim().split(" ")[0]!;
+
     // Завершаем визит: это должно создать платёж.
     await row.getByRole("button", { name: "Действия над записью" }).click();
     await page.getByRole("menuitem", { name: "Визит состоялся" }).click();
@@ -71,9 +74,13 @@ test.describe("критический путь администратора", ()
     await expect(row.getByText("Состоялась")).toBeVisible();
 
     // Деньги должны появиться в финансах — это и есть смысл завершения визита.
+    // Проверяем именно платёж этого клиента, а не то, что страница отрисовалась:
+    // иначе тест пройдёт и при полностью сломанном создании платежа.
     await page.goto("/finance");
-    await expect(page.getByRole("heading", { name: "Финансы" })).toBeVisible();
-    await expect(page.getByText("Последние операции")).toBeVisible();
+
+    const operations = page.locator("li").filter({ hasText: clientName });
+    await expect(operations.first()).toBeVisible();
+    await expect(operations.first()).toContainText("+");
   });
 
   test("занятый слот исчезает из предложенных", async ({ page }) => {
@@ -113,25 +120,84 @@ test.describe("критический путь администратора", ()
     expect(await after.allTextContents()).not.toContain(chosen);
   });
 
-  test("абонемент списывается при завершении визита", async ({ page }) => {
+  test("резерв по абонементу уменьшает остаток", async ({ page }) => {
+    // Название теста обещает конкретное поведение, поэтому и проверяется оно:
+    // остаток до записи, остаток после. Проверка «блок абонементов виден»
+    // прошла бы и при полностью сломанном списании.
+    const target = new Date();
+    target.setDate(target.getDate() + 5);
+    if (target.getDay() === 0) target.setDate(target.getDate() + 1);
+    const isoDate = target.toISOString().slice(0, 10);
+
     await page.goto("/clients");
-    await page.locator("li a").first().click();
+    const clientLink = page.locator("li a").first();
+    const clientName = (await clientLink.textContent())!.trim().split(" ")[0]!;
+    await clientLink.click();
 
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    // Ждём завершения перехода: page.url() сразу после click ещё вернёт
+    // адрес списка, и возврат «на карточку» приведёт обратно в список.
+    await page.waitForURL(/\/clients\/.+/);
+    const clientUrl = page.url();
 
-    // Продаём абонемент и убеждаемся, что остаток отображается полным.
+    // Продаём пакет: первый в списке — на «Классический массаж, 60 мин».
     await page.getByRole("button", { name: "Продать абонемент" }).click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText("Продажа абонемента")).toBeVisible();
+    const sellDialog = page.getByRole("dialog");
+    await expect(sellDialog.getByText("Продажа абонемента")).toBeVisible();
 
-    const planLabel = await dialog.getByLabel("Абонемент").inputValue();
-    expect(planLabel).toBeTruthy();
+    // Пакет выбираем явно: тест дальше записывает на классический массаж,
+    // и полагаться на то, какой пакет окажется первым, нельзя.
+    const planSelect = sellDialog.getByLabel("Абонемент");
+    const planValue = await planSelect
+      .locator("option", { hasText: "Классический массаж" })
+      .first()
+      .getAttribute("value");
 
-    await dialog.getByRole("button", { name: "Продать" }).click();
-    await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+    await planSelect.selectOption(planValue!);
 
-    const subscriptions = page.locator("section, div").filter({ hasText: "Абонементы" });
-    await expect(subscriptions.first()).toBeVisible();
+    await sellDialog.getByRole("button", { name: "Продать" }).click();
+    await expect(sellDialog).not.toBeVisible({ timeout: 15_000 });
+
+    // Свежекупленный пакет — полный: сколько сеансов куплено, столько и доступно.
+    const badge = page.getByText(/^\d+ из \d+ сеанс/).first();
+    await expect(badge).toBeVisible();
+
+    const before = (await badge.textContent())!;
+    const total = Number(before.match(/из (\d+)/)![1]);
+    expect(Number(before.match(/^(\d+)/)![1])).toBe(total);
+
+    // Записываем на услугу этого абонемента и платим им же.
+    await page.goto(`/calendar?date=${isoDate}`);
+    await page.getByRole("button", { name: "Записать" }).click();
+
+    const booking = page.getByRole("dialog");
+    // selectOption принимает label только строкой, поэтому находим значение
+    // нужной опции по фамилии клиента.
+    const clientSelect = booking.getByLabel("Клиент");
+    const clientValue = await clientSelect
+      .locator("option", { hasText: clientName })
+      .first()
+      .getAttribute("value");
+
+    await clientSelect.selectOption(clientValue!);
+    await booking.getByLabel("Услуга").selectOption({ label: "Классический массаж, 60 мин" });
+    await booking.getByLabel("Дата").fill(isoDate);
+
+    const slot = booking.locator("button").filter({ hasText: /^\d{2}:\d{2}$/ }).first();
+    await expect(slot).toBeVisible({ timeout: 15_000 });
+
+    // Абонемент подходит услуге, поэтому форма должна сама предложить оплату им.
+    await expect(booking.getByRole("radio", { name: /абонемент/i })).toBeChecked();
+
+    await slot.click();
+    await booking.getByRole("button", { name: "Записать" }).click();
+    await expect(booking).not.toBeVisible({ timeout: 15_000 });
+
+    // Резерв уменьшает доступный остаток сразу: иначе клиент запишется
+    // десять раз по абонементу на пять сеансов.
+    await page.goto(clientUrl);
+    const after = (await page.getByText(/^\d+ из \d+ сеанс/).first().textContent())!;
+
+    expect(Number(after.match(/^(\d+)/)![1])).toBe(total - 1);
   });
 });
 

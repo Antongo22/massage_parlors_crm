@@ -29,7 +29,9 @@ export default async function ClientCardPage({ params }: { params: Promise<{ id:
   const plans = await prisma.subscriptionPlan.findMany({
     where: { isActive: true },
     include: { service: { select: { name: true, priceMinor: true } } },
-    orderBy: { sessionsCount: "asc" },
+    // Вторичная сортировка обязательна: пакетов с одинаковым числом сеансов
+    // несколько, и без неё порядок в списке меняется от запроса к запросу.
+    orderBy: [{ sessionsCount: "asc" }, { name: "asc" }],
   });
 
   const contraindications = client.notes.filter((note) => note.type === "CONTRAINDICATION");

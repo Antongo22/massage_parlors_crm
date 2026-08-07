@@ -82,7 +82,9 @@ async function main() {
     `Готово: ${counts[0]} клиентов, ${counts[1]} услуг, ${counts[2]} записей, ` +
       `${counts[3]} абонементов, ${counts[4]} платежей`,
   );
-  console.info("Вход: admin@example.com (ссылка придёт в Mailpit на http://localhost:8025)");
+  console.info("Вход администратора: admin@example.com");
+  console.info("Вход клиента: olga@example.com, sergey@example.com, anna.s@example.com");
+  console.info("Ссылки для входа придут в Mailpit: http://localhost:8025");
 }
 
 async function truncate() {
@@ -221,6 +223,18 @@ async function seedClients() {
         birthDate: new Date(1985 + index, index % 12, 1 + (index % 27)),
       },
     });
+
+    // Учётные записи — только первым трём. Так и в жизни: большинство
+    // клиентов салона никогда не зайдут в систему, и интерфейс должен
+    // одинаково работать с карточкой и без учётки, и с ней.
+    // Эти трое нужны, чтобы кабинет клиента было чем посмотреть.
+    if (index < 3) {
+      const user = await prisma.user.create({
+        data: { email, name: `${firstName} ${lastName}`, role: "CLIENT", emailVerified: new Date() },
+      });
+
+      await prisma.client.update({ where: { id: client.id }, data: { userId: user.id } });
+    }
 
     // Заметки не у всех: карточка без заметок — нормальное состояние,
     // и интерфейс должен выглядеть прилично в обоих случаях.
