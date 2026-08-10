@@ -183,13 +183,25 @@ main() {
 
   mkdir -p backups
 
-  info "Собираем образы (первый раз это несколько минут)"
-  $COMPOSE build
+  local prebuilt_images
+  prebuilt_images=$(sed -n 's/^PREBUILT_IMAGES=//p' "$ENV_FILE" | tail -n 1)
+
+  if [[ "$prebuilt_images" == "true" ]]; then
+    info "Скачиваем проверенные CI образы из container registry"
+    $COMPOSE pull app worker migrate
+  else
+    info "Собираем образы (первый раз это несколько минут)"
+    $COMPOSE build
+  fi
 
   info "Поднимаем сервисы"
   # Миграции накатывает отдельный сервис, приложение ждёт его успешного
   # завершения — стартовать на несоответствующей схеме оно не может.
-  $COMPOSE up -d --remove-orphans
+  if [[ "$prebuilt_images" == "true" ]]; then
+    $COMPOSE up -d --no-build --remove-orphans
+  else
+    $COMPOSE up -d --remove-orphans
+  fi
 
   info "Ждём готовности приложения"
   app_ready=false

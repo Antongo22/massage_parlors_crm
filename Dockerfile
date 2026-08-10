@@ -13,6 +13,14 @@ FROM base AS deps
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# Генерация Prisma не зависит от Next.js. Выносим её в отдельную стадию,
+# чтобы образы миграций и воркера не тянули за собой тяжёлый `next build`.
+FROM base AS prisma-generated
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json prisma.config.ts ./
+COPY prisma ./prisma
+RUN npx prisma generate
+
 # --- разработка --------------------------------------------------------------
 # Исходники монтируются томом из docker-compose, поэтому здесь только окружение.
 FROM base AS dev
@@ -41,11 +49,11 @@ FROM base AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+COPY --from=prisma-generated /app/generated ./generated
 # Next допускает проект без статических файлов, но COPY из следующей стадии
 # требует существующий каталог. Создаём его в образе, не заставляя репозиторий
 # хранить фиктивный .gitkeep.
 RUN mkdir -p public
-RUN npx prisma generate
 # Значение подставное: страницы с данными динамические и к БД на сборке
 # не обращаются, но клиент Prisma отказывается инициализироваться без URL.
 RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" npm run build
@@ -85,7 +93,7 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
-COPY --from=builder /app/generated ./generated
+COPY --from=prisma-generated /app/generated ./generated
 
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 prisma \
@@ -110,7 +118,7 @@ COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
 COPY lib ./lib
 COPY worker ./worker
-COPY --from=builder /app/generated ./generated
+COPY --from=prisma-generated /app/generated ./generated
 
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nodejs \

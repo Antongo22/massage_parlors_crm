@@ -380,9 +380,12 @@ location / {
 
 Workflow `.github/workflows/deploy.yml` запускается после успешного полного CI
 на ветке `main` или вручную через **Run workflow**. Он обновляет репозиторий в
-`/root/massage_parlors_crm`, безопасно записывает `.env.production`, запускает
-`deploy.sh`, проверяет приложение снаружи и отправляет результат в Telegram.
-База данных и Redis перед обновлением не останавливаются.
+`/root/massage_parlors_crm`, собирает три production-образа на GitHub runner,
+публикует их в GHCR, безопасно записывает `.env.production` и заставляет VPS
+только скачать готовые образы, применить миграции и перезапустить сервисы.
+После этого workflow проверяет приложение снаружи и отправляет результат в
+Telegram. База данных и Redis перед обновлением не останавливаются, а маленькой
+VPS не требуется выполнять ресурсоёмкий `next build`.
 
 Добавьте Secrets в **Settings → Secrets and variables → Actions**. Их можно
 хранить на уровне репозитория или в GitHub Environment с именем `production`:
