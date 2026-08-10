@@ -33,22 +33,9 @@ jobs:
     environment: production
 
     steps:
-      - name: Проверить результат CI
-        id: gate
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-        run: |
-          if [[ "$EVENT_NAME" == "workflow_run" && "$CI_CONCLUSION" != "success" ]]; then
-            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
-            echo "CI завершился со статусом $CI_CONCLUSION — деплой отменён"
-          else
-            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Подготовить production env
         id: prepare_env
-        if: steps.gate.outputs.should_deploy == 'true'
+        if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
         env:
           PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         run: |
@@ -63,7 +50,7 @@ jobs:
 
       - name: Обновить приложение по SSH
         id: ssh_deploy
-        if: steps.gate.outputs.should_deploy == 'true'
+        if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         env:
           DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
@@ -103,7 +90,7 @@ jobs:
 
       - name: Проверить приложение извне
         id: healthcheck
-        if: steps.gate.outputs.should_deploy == 'true'
+        if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
         run: |
           curl \
             --fail \
@@ -136,7 +123,7 @@ jobs:
 
           short_sha="${COMMIT_SHA:0:7}"
 
-          if [[ "${{ steps.gate.outputs.should_deploy }}" != "true" ]]; then
+          if [[ "${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}" != "true" ]]; then
             title="❌ CI не пройден — деплой отменён"
             details="Статус CI: ${CI_CONCLUSION:-unknown}"
           elif [[ "$PREPARE_OUTCOME" == "success" && "$DEPLOY_OUTCOME" == "success" && "$HEALTHCHECK_OUTCOME" == "success" ]]; then
@@ -170,5 +157,5 @@ jobs:
             > /dev/null
 
       - name: Завершить workflow ошибкой, если CI не пройден
-        if: always() && steps.gate.outputs.should_deploy != 'true'
+        if: always() && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success'
         run: exit 1
