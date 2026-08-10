@@ -1,6 +1,13 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
+import {
+  localDateTimeToInstant,
+  shiftLocalDate,
+  todayLocalDate,
+  weekdayOf,
+  type LocalDate,
+} from "../lib/domain/time";
 
 /**
  * Демонстрационные данные.
@@ -284,15 +291,14 @@ async function seedAppointments(params: {
   const PAST_COUNT = 22;
   const FUTURE_COUNT = 8;
 
-  const workingDay = (offset: number): Date => {
-    const day = new Date(now);
-    day.setDate(day.getDate() + offset);
-    return day;
+  const today = todayLocalDate(params.timezone, now);
+  const workingDay = (offset: number): LocalDate => shiftLocalDate(today, offset);
+  const isWorkingDay = (date: LocalDate) => {
+    const weekday = weekdayOf(date, params.timezone);
+    return weekday !== 0 && weekday !== 6;
   };
 
-  const isWorkingDay = (date: Date) => date.getDay() !== 0 && date.getDay() !== 6;
-
-  const plan: Array<{ date: Date; hour: number; status: string }> = [];
+  const plan: Array<{ date: LocalDate; hour: number; status: string }> = [];
 
   // Прошлое: идём назад по дням, набирая по три визита.
   for (let offset = -1; plan.length < PAST_COUNT; offset -= 1) {
@@ -304,7 +310,7 @@ async function seedAppointments(params: {
 
       const index = plan.length;
       plan.push({
-        date: new Date(day),
+        date: day,
         hour,
         // Каждая седьмая — неявка, каждая девятая — отмена: они должны быть
         // заметны в статистике, но не доминировать над нормальными визитами.
@@ -322,7 +328,7 @@ async function seedAppointments(params: {
       if (plan.length >= PAST_COUNT + FUTURE_COUNT) break;
 
       plan.push({
-        date: new Date(day),
+        date: day,
         hour,
         status: plan.length % 4 === 0 ? "PENDING" : "CONFIRMED",
       });
@@ -333,8 +339,7 @@ async function seedAppointments(params: {
     const service = params.services[index % params.services.length]!;
     const client = params.clients[index % params.clients.length]!;
 
-    const startsAt = new Date(item.date);
-    startsAt.setHours(item.hour, 0, 0, 0);
+    const startsAt = localDateTimeToInstant(item.date, item.hour * 60, params.timezone);
 
     const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
     const blockedUntil = new Date(endsAt.getTime() + params.bufferMinutes * 60_000);

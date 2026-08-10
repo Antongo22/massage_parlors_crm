@@ -42,7 +42,17 @@ export default async function CalendarPage({
     prisma.client.findMany({
       where: { archivedAt: null },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-      select: { id: true, lastName: true, firstName: true, phone: true },
+      select: {
+        id: true,
+        lastName: true,
+        firstName: true,
+        phone: true,
+        notes: {
+          where: { type: "CONTRAINDICATION" },
+          select: { body: true },
+          orderBy: { createdAt: "desc" },
+        },
+      },
     }),
     prisma.master.findMany({
       where: { isActive: true },
@@ -55,6 +65,7 @@ export default async function CalendarPage({
     clients: clients.map((client) => ({
       id: client.id,
       label: `${client.lastName} ${client.firstName} · ${client.phone}`,
+      contraindications: client.notes.map((note) => note.body),
     })),
     masters,
     defaultDate: date,

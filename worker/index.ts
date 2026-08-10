@@ -11,6 +11,7 @@ import {
   type MaintenanceJob,
   type ReminderJob,
 } from "@/lib/queue";
+import { enqueueReminderAt } from "@/lib/services/notifications";
 import { expireSubscriptions } from "@/lib/services/subscriptions";
 
 /**
@@ -114,6 +115,11 @@ const maintenanceWorker = new Worker<MaintenanceJob>(
 
     if (job.data.kind === "notify-expiring-subscriptions") {
       await notifyExpiringSubscriptions();
+      return;
+    }
+
+    if (job.data.kind === "reconcile-reminders") {
+      await reconcileReminders();
     }
   },
   { connection, concurrency: 1 },
@@ -179,6 +185,51 @@ async function notifyExpiringSubscriptions() {
   console.info(`[maintenance] предупреждений о сгорании: ${subscriptions.length}`);
 }
 
+/**
+ * Возвращает в Redis задачи, которые не удалось поставить при создании записи.
+ * attempts=0 отличает сбой очереди от исчерпанных SMTP-ретраев: последние не
+ * должны запускаться бесконечно каждые пять минут.
+ */
+async function reconcileReminders() {
+  const now = new Date();
+  const graceFrom = new Date(now.getTime() - 30 * 60_000);
+  const logs = await prisma.notificationLog.findMany({
+    where: {
+      type: "REMINDER_2H",
+      status: "FAILED",
+      attempts: 0,
+      scheduledFor: { gte: graceFrom },
+      appointment: { status: { in: ["PENDING", "CONFIRMED"] } },
+    },
+    select: { id: true, appointmentId: true, scheduledFor: true },
+    take: 500,
+  });
+
+  let restored = 0;
+
+  for (const log of logs) {
+    if (!log.appointmentId) continue;
+
+    try {
+      await enqueueReminderAt(log.appointmentId, log.scheduledFor, now);
+      await prisma.notificationLog.update({
+        where: { id: log.id },
+        data: { status: "SCHEDULED", lastError: null },
+      });
+      restored += 1;
+    } catch (error) {
+      await prisma.notificationLog.update({
+        where: { id: log.id },
+        data: { status: "FAILED", lastError: String(error) },
+      });
+    }
+  }
+
+  if (restored > 0) {
+    console.info(`[maintenance] восстановлено напоминаний: ${restored}`);
+  }
+}
+
 async function markFailed(logId: string | undefined, error: string) {
   if (!logId) return;
 
@@ -228,6 +279,12 @@ async function scheduleRepeatableJobs() {
     "notify-expiring",
     { pattern: "0 10 * * *" },
     { name: "maintenance", data: { kind: "notify-expiring-subscriptions" } },
+  );
+
+  await queue.upsertJobScheduler(
+    "reconcile-reminders",
+    { pattern: "*/5 * * * *" },
+    { name: "maintenance", data: { kind: "reconcile-reminders" } },
   );
 }
 

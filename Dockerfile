@@ -41,6 +41,10 @@ FROM base AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Next допускает проект без статических файлов, но COPY из следующей стадии
+# требует существующий каталог. Создаём его в образе, не заставляя репозиторий
+# хранить фиктивный .gitkeep.
+RUN mkdir -p public
 RUN npx prisma generate
 # Значение подставное: страницы с данными динамические и к БД на сборке
 # не обращаются, но клиент Prisma отказывается инициализироваться без URL.
@@ -70,6 +74,25 @@ EXPOSE 3000
 ENV PORT=3000 HOSTNAME=0.0.0.0
 
 CMD ["node", "server.js"]
+
+# --- миграции ---------------------------------------------------------------
+# Standalone-образ приложения намеренно не содержит Prisma CLI. Миграции
+# выполняются отдельным минимальным образом с зафиксированной версией CLI,
+# поэтому деплой не скачивает `latest` через npx и не зависит от npm registry.
+FROM base AS migration
+ENV NODE_ENV=production
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json prisma.config.ts ./
+COPY prisma ./prisma
+COPY --from=builder /app/generated ./generated
+
+RUN addgroup --system --gid 1001 nodejs \
+ && adduser --system --uid 1001 prisma \
+ && chown -R prisma:nodejs /app
+
+USER prisma
+CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
 
 # --- воркер ------------------------------------------------------------------
 # Отдельная стадия, а не runner: standalone-сборка Next включает только то,

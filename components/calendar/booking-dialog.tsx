@@ -43,7 +43,7 @@ export function BookingDialog({
   trigger,
 }: {
   services: Service[];
-  clients: Array<{ id: string; label: string }>;
+  clients: Array<{ id: string; label: string; contraindications: string[] }>;
   masters: Array<{ id: string; displayName: string }>;
   defaultDate: string;
   defaultClientId?: string;
@@ -80,6 +80,7 @@ export function BookingDialog({
   );
 
   const service = services.find((item) => item.id === serviceId);
+  const selectedClient = clients.find((item) => item.id === clientId);
 
   // Слоты зависят от услуги (её длительности), мастера и даты — пересчитываем
   // при изменении любого из трёх. Сброс выбранного слота идёт внутри перехода,
@@ -158,6 +159,16 @@ export function BookingDialog({
                   </option>
                 ))}
               </select>
+              {selectedClient && selectedClient.contraindications.length > 0 && (
+                <div className="border-destructive/30 bg-destructive/5 rounded-md border p-3">
+                  <p className="text-destructive text-xs font-medium">Противопоказания</p>
+                  <ul className="mt-1 space-y-1 text-xs">
+                    {selectedClient.contraindications.map((body) => (
+                      <li key={body}>{body}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">

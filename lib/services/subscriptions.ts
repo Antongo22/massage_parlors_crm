@@ -276,6 +276,89 @@ export async function sellSubscription(params: {
   });
 }
 
+/**
+ * Денежный возврат по абонементу.
+ *
+ * Сумма уже оформленных возвратов — агрегат по Payment, поэтому операции
+ * сериализуются блокировкой Subscription. Иначе два параллельных запроса
+ * могли оба пройти проверку и вместе вернуть больше исходной продажи.
+ */
+export async function refundSubscription(params: {
+  subscriptionId: string;
+  amountMinor: number;
+  actorUserId: string | null;
+  now?: Date;
+}) {
+  const now = params.now ?? new Date();
+
+  return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM "Subscription" WHERE id = ${params.subscriptionId} FOR UPDATE
+    `;
+
+    if (locked.length === 0) {
+      throw new DomainError("NOT_FOUND", "Абонемент не найден");
+    }
+
+    const subscription = await tx.subscription.findUniqueOrThrow({
+      where: { id: params.subscriptionId },
+      include: { payments: { where: { kind: "SALE" } } },
+    });
+    const sale = subscription.payments[0];
+
+    if (!sale) {
+      throw new DomainError("NOT_FOUND", "Не найдена исходная продажа абонемента");
+    }
+
+    const alreadyRefunded = await tx.payment.aggregate({
+      where: { refundedPaymentId: sale.id, kind: "REFUND" },
+      _sum: { amountMinor: true },
+    });
+    const remaining = sale.amountMinor - (alreadyRefunded._sum.amountMinor ?? 0);
+
+    if (params.amountMinor <= 0 || params.amountMinor !== remaining) {
+      throw new DomainError(
+        "FORBIDDEN",
+        "Абонемент закрывается только полным возвратом оставшейся суммы",
+      );
+    }
+
+    const payment = await tx.payment.create({
+      data: {
+        clientId: subscription.clientId,
+        subscriptionId: subscription.id,
+        refundedPaymentId: sale.id,
+        kind: "REFUND",
+        amountMinor: params.amountMinor,
+        method: sale.method,
+        paidAt: now,
+      },
+    });
+
+    await tx.subscriptionUsage.updateMany({
+      where: { subscriptionId: subscription.id, state: "RESERVED" },
+      data: { state: "REVERTED", revertedAt: now },
+    });
+
+    await tx.subscription.update({
+      where: { id: subscription.id },
+      data: { status: "REFUNDED" },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        actorUserId: params.actorUserId,
+        entity: "Subscription",
+        entityId: subscription.id,
+        action: "refund",
+        diff: { amountMinor: params.amountMinor },
+      },
+    });
+
+    return payment;
+  });
+}
+
 /** Помечает сгоревшие абонементы. Вызывается воркером по расписанию. */
 export async function expireSubscriptions(now = new Date()): Promise<number> {
   const result = await prisma.subscription.updateMany({
