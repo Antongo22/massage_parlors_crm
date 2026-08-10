@@ -349,6 +349,22 @@ git clone <repo> && cd massage_parlors_crm
 Если SSL уже обслуживает внешний nginx, оставьте `COMPOSE_PROFILES` пустым и
 направьте reverse proxy на `http://127.0.0.1:8080`.
 
+Для `trexon-a.ru` location в существующем nginx должен выглядеть так (отдельные
+настройки `proxy_buffering` и timeout нужны для долгоживущего SSE-чата):
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+}
+```
+
 Требуется: A-запись домена указывает на сервер, порты 80 и 443 открыты.
 
 Повторный запуск `./deploy.sh` работает как обновление: пересоберёт образы
