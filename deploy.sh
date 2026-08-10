@@ -17,9 +17,84 @@ info() { printf '\033[36m→\033[0m %s\n' "$1"; }
 ok() { printf '\033[32m✓\033[0m %s\n' "$1"; }
 fail() { printf '\033[31m✗\033[0m %s\n' "$1" >&2; exit 1; }
 
+run_privileged() {
+  if [[ "$EUID" -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+    sudo -n "$@"
+  else
+    fail "Для установки Docker Compose нужны root-права. Запустите: sudo ./deploy.sh"
+  fi
+}
+
+install_compose_plugin() {
+  docker compose version >/dev/null 2>&1 && return
+
+  info "Docker Compose v2 не найден — устанавливаем CLI plugin"
+
+  # Официальный пакет обновляется вместе с системой и потому предпочтительнее
+  # ручной установки. Название docker-compose-v2 используется в репозиториях
+  # Ubuntu, docker-compose-plugin — в официальном репозитории Docker.
+  if command -v apt-get >/dev/null 2>&1; then
+    if run_privileged apt-get update; then
+      run_privileged apt-get install -y docker-compose-plugin >/dev/null 2>&1 || \
+        run_privileged apt-get install -y docker-compose-v2 >/dev/null 2>&1 || true
+    fi
+  elif command -v dnf >/dev/null 2>&1; then
+    run_privileged dnf install -y docker-compose-plugin || true
+  elif command -v yum >/dev/null 2>&1; then
+    run_privileged yum install -y docker-compose-plugin || true
+  fi
+
+  docker compose version >/dev/null 2>&1 && return
+
+  # Fallback для серверов без подключённого Docker package repository.
+  # Версия и checksum зафиксированы: latest-URL без проверки целостности здесь
+  # недопустим, поскольку скачанный бинарник получает root-права.
+  command -v curl >/dev/null 2>&1 || fail "Для установки Compose нужен curl"
+  command -v sha256sum >/dev/null 2>&1 || fail "Для проверки Compose нужен sha256sum"
+
+  local compose_version="v5.1.4"
+  local compose_arch compose_sha256
+  case "$(uname -m)" in
+    x86_64|amd64)
+      compose_arch="x86_64"
+      compose_sha256="33b208d7e76639db742fae84b966cc01dacae58ca3fc4dabbc907045aefdf0c4"
+      ;;
+    aarch64|arm64)
+      compose_arch="aarch64"
+      compose_sha256="d4fb48b72857810314d3ee77123c89954101844efa4788031221f4c370495946"
+      ;;
+    *)
+      fail "Архитектура $(uname -m) не поддерживается автоматической установкой Compose"
+      ;;
+  esac
+
+  local compose_tmp
+  compose_tmp=$(mktemp)
+
+  if ! curl --fail --silent --show-error --location \
+    "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-${compose_arch}" \
+    --output "$compose_tmp"; then
+    rm -f "$compose_tmp"
+    fail "Не удалось скачать Docker Compose ${compose_version}"
+  fi
+  if ! printf '%s  %s\n' "$compose_sha256" "$compose_tmp" | sha256sum --check --status; then
+    rm -f "$compose_tmp"
+    fail "Checksum Docker Compose не совпал — установка остановлена"
+  fi
+
+  run_privileged install -d -m 755 /usr/local/lib/docker/cli-plugins
+  run_privileged install -m 755 "$compose_tmp" /usr/local/lib/docker/cli-plugins/docker-compose
+  rm -f "$compose_tmp"
+
+  docker compose version >/dev/null 2>&1 || fail "Docker Compose установлен, но Docker CLI не видит plugin"
+  ok "Установлен $(docker compose version --short)"
+}
+
 require_docker() {
   command -v docker >/dev/null 2>&1 || fail "Docker не установлен. Инструкция: https://docs.docker.com/engine/install/"
-  docker compose version >/dev/null 2>&1 || fail "Нужен Docker Compose v2 (входит в современный Docker)"
+  install_compose_plugin
   docker info >/dev/null 2>&1 || fail "Docker-демон не запущен или нет прав. Попробуйте: sudo ./deploy.sh"
 }
 
