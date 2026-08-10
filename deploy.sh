@@ -72,6 +72,9 @@ create_env() {
 
 DOMAIN=$domain
 ACME_EMAIL=$acme_email
+# Встроенный Caddy включён для чистой VPS. Если HTTPS уже обслуживает внешний
+# nginx, оставьте COMPOSE_PROFILES пустым и проксируйте его на порт приложения.
+COMPOSE_PROFILES=caddy
 
 POSTGRES_USER=crm
 POSTGRES_PASSWORD=$(generate_secret | tr -d '/+=' | head -c 32)
@@ -132,11 +135,22 @@ main() {
   echo
   ok "Готово"
   echo
+  local compose_profiles app_port
+  compose_profiles=$(sed -n 's/^COMPOSE_PROFILES=//p' "$ENV_FILE" | tail -n 1)
+  app_port=$(sed -n 's/^APP_PORT=//p' "$ENV_FILE" | tail -n 1)
+  app_port=${app_port:-8080}
+
   echo "  Первичная настройка: https://${domain}/setup"
+  echo "  Прямой адрес:       http://<IP-сервера>:${app_port}/setup"
   echo
-  echo "  Сертификат Let's Encrypt выпускается автоматически при первом"
-  echo "  обращении к домену. Убедитесь, что A-запись ${domain} указывает"
-  echo "  на этот сервер, а порты 80 и 443 открыты."
+  if [[ ",${compose_profiles}," == *",caddy,"* ]]; then
+    echo "  Сертификат Let's Encrypt выпускается автоматически при первом"
+    echo "  обращении к домену. Убедитесь, что A-запись ${domain} указывает"
+    echo "  на этот сервер, а порты 80 и 443 открыты."
+  else
+    echo "  Встроенный Caddy отключён. Внешний reverse proxy должен направлять"
+    echo "  https://${domain} на http://127.0.0.1:${app_port}."
+  fi
   echo
   echo "  Логи:      docker compose -f docker-compose.prod.yml logs -f"
   echo "  Остановка: docker compose -f docker-compose.prod.yml down"

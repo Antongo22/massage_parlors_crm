@@ -344,13 +344,64 @@ git clone <repo> && cd massage_parlors_crm
 ```
 
 Скрипт спросит домен и email для сертификата, сгенерирует секреты, соберёт
-образы и поднимет всё под HTTPS. Сертификат Let's Encrypt Caddy получает
-и продлевает сам — ни cron, ни certbot не нужны.
+образы и поднимет всё под HTTPS. На чистой VPS профиль `caddy` включается
+автоматически: Caddy получает и продлевает сертификат без cron и certbot.
+Если SSL уже обслуживает внешний nginx, оставьте `COMPOSE_PROFILES` пустым и
+направьте reverse proxy на `http://127.0.0.1:8080`.
 
 Требуется: A-запись домена указывает на сервер, порты 80 и 443 открыты.
 
 Повторный запуск `./deploy.sh` работает как обновление: пересоберёт образы
 и накатит новые миграции, не трогая данные и не переспрашивая настройки.
+
+Контейнер приложения также публикуется на `${APP_PORT:-8080}`. При стандартной
+конфигурации оно доступно по `http://<IP-сервера>:8080`; основной боевой адрес
+с авторизацией и email-ссылками — HTTPS-домен, указанный при настройке.
+
+### Автодеплой через GitHub Actions
+
+Workflow `.github/workflows/deploy.yml` запускается после успешного полного CI
+на ветке `main` или вручную через **Run workflow**. Он обновляет репозиторий в
+`/root/massage_parlors_crm`, безопасно записывает `.env.production`, запускает
+`deploy.sh`, проверяет приложение снаружи и отправляет результат в Telegram.
+База данных и Redis перед обновлением не останавливаются.
+
+Добавьте Secrets в **Settings → Secrets and variables → Actions**. Их можно
+хранить на уровне репозитория или в GitHub Environment с именем `production`:
+
+| Secret | Назначение |
+|---|---|
+| `SSH_PASSWORD` | Пароль SSH; не нужен, если задан `SSH_PRIVATE_KEY` |
+| `SSH_PRIVATE_KEY` | Приватный SSH-ключ; предпочтительнее пароля |
+| `SSH_FINGERPRINT` | Необязательно, но рекомендуется: fingerprint host key сервера для защиты от MITM |
+| `PRODUCTION_ENV` | Полное многострочное содержимое `.env.production` |
+| `TELEGRAM_BOT_TOKEN` | Токен бота от BotFather |
+| `TELEGRAM_CHAT_ID` | ID пользователя, группы или канала для уведомлений |
+
+Минимальное содержимое `PRODUCTION_ENV`:
+
+```dotenv
+DOMAIN=crm.example.com
+ACME_EMAIL=admin@example.com
+APP_PORT=8080
+# Пусто для существующего nginx; значение caddy включает встроенный HTTPS.
+COMPOSE_PROFILES=
+POSTGRES_USER=crm
+POSTGRES_PASSWORD=replace-with-a-long-alphanumeric-password
+POSTGRES_DB=crm
+AUTH_SECRET=replace-with-openssl-rand-base64-32
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=user
+SMTP_PASSWORD=password
+SMTP_SECURE=false
+MAIL_FROM="CRM <noreply@example.com>"
+```
+
+`SSH_HOST`, `SSH_USERNAME`, `SSH_PORT`, `DEPLOY_PATH`, `PUBLIC_URL` можно задать
+как Actions Secrets или Variables. Для текущей VPS уже заданы defaults:
+`root@83.217.203.34:22`, путь
+`/root/massage_parlors_crm`, публичный адрес `https://trexon-a.ru`.
 
 Бэкап базы — `./scripts/backup.sh` (хранит последние 14 дампов).
 

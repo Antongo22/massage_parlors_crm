@@ -1,0 +1,174 @@
+name: Deploy production
+
+on:
+  # Автодеплой начинается только после успешного полного CI на main.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Два деплоя не должны одновременно пересобирать одни и те же контейнеры.
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  # Несекретные значения можно переопределить в Settings → Secrets and
+  # variables → Actions → Variables. Значения ниже уже подходят этой VPS.
+  SSH_HOST: ${{ secrets.SSH_HOST || vars.SSH_HOST || '83.217.203.34' }}
+  SSH_USERNAME: ${{ secrets.SSH_USERNAME || vars.SSH_USERNAME || 'root' }}
+  SSH_PORT: ${{ secrets.SSH_PORT || vars.SSH_PORT || '22' }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || vars.DEPLOY_PATH || '/root/massage_parlors_crm' }}
+  DEPLOY_BRANCH: main
+  PUBLIC_URL: ${{ secrets.PUBLIC_URL || vars.PUBLIC_URL || 'https://trexon-a.ru' }}
+
+jobs:
+  deploy:
+    name: Deploy и уведомление
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Проверить результат CI
+        id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_run" && "$CI_CONCLUSION" != "success" ]]; then
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            echo "CI завершился со статусом $CI_CONCLUSION — деплой отменён"
+          else
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Подготовить production env
+        id: prepare_env
+        if: steps.gate.outputs.should_deploy == 'true'
+        env:
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+        run: |
+          if [[ -z "$PRODUCTION_ENV" ]]; then
+            echo "::error::Добавьте secret PRODUCTION_ENV в GitHub Environment production"
+            exit 1
+          fi
+
+          production_env_b64="$(printf '%s' "$PRODUCTION_ENV" | base64 -w 0)"
+          echo "::add-mask::$production_env_b64"
+          echo "PRODUCTION_ENV_B64=$production_env_b64" >> "$GITHUB_ENV"
+
+      - name: Обновить приложение по SSH
+        id: ssh_deploy
+        if: steps.gate.outputs.should_deploy == 'true'
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          DEPLOY_BRANCH: ${{ env.DEPLOY_BRANCH }}
+          PRODUCTION_ENV_B64: ${{ env.PRODUCTION_ENV_B64 }}
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USERNAME }}
+          port: ${{ env.SSH_PORT }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fingerprint: ${{ secrets.SSH_FINGERPRINT }}
+          timeout: 30s
+          command_timeout: 30m
+          envs: DEPLOY_PATH,DEPLOY_BRANCH,PRODUCTION_ENV_B64
+          script: |
+            set -eu
+
+            if [ ! -d "$DEPLOY_PATH/.git" ]; then
+              echo "Репозиторий не найден: $DEPLOY_PATH" >&2
+              exit 1
+            fi
+
+            cd "$DEPLOY_PATH"
+            git fetch --prune origin "$DEPLOY_BRANCH"
+            git checkout "$DEPLOY_BRANCH"
+            git merge --ff-only "origin/$DEPLOY_BRANCH"
+
+            # Секрет передаётся как base64, чтобы переносы строк и спецсимволы
+            # не повредились при передаче через SSH.
+            umask 077
+            printf '%s' "$PRODUCTION_ENV_B64" | base64 --decode > .env.production.tmp
+            mv .env.production.tmp .env.production
+            chmod 600 .env.production
+
+            ./deploy.sh
+
+      - name: Проверить приложение извне
+        id: healthcheck
+        if: steps.gate.outputs.should_deploy == 'true'
+        run: |
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 12 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --max-time 15 \
+            "${PUBLIC_URL%/}/login" > /dev/null
+
+      - name: Отправить результат в Telegram
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          PREPARE_OUTCOME: ${{ steps.prepare_env.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.ssh_deploy.outcome }}
+          HEALTHCHECK_OUTCOME: ${{ steps.healthcheck.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACTOR: ${{ github.event.workflow_run.actor.login || github.actor }}
+          COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
+            echo "::error::Добавьте TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в Environment production"
+            exit 1
+          fi
+
+          short_sha="${COMMIT_SHA:0:7}"
+
+          if [[ "${{ steps.gate.outputs.should_deploy }}" != "true" ]]; then
+            title="❌ CI не пройден — деплой отменён"
+            details="Статус CI: ${CI_CONCLUSION:-unknown}"
+          elif [[ "$PREPARE_OUTCOME" == "success" && "$DEPLOY_OUTCOME" == "success" && "$HEALTHCHECK_OUTCOME" == "success" ]]; then
+            title="✅ Деплой успешен"
+            details="Приложение: $PUBLIC_URL"
+          else
+            title="❌ Деплой завершился ошибкой"
+            details="env: $PREPARE_OUTCOME, SSH: $DEPLOY_OUTCOME, healthcheck: $HEALTHCHECK_OUTCOME"
+          fi
+
+          message="$title
+
+          Репозиторий: ${{ github.repository }}
+          Ветка: $DEPLOY_BRANCH
+          Коммит: $short_sha
+          Сервер: $SSH_USERNAME@$SSH_HOST:$SSH_PORT
+          Запустил: $ACTOR
+          $details
+
+          Логи: $RUN_URL"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --request POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${message}" \
+            --data-urlencode "disable_web_page_preview=true" \
+            > /dev/null
+
+      - name: Завершить workflow ошибкой, если CI не пройден
+        if: always() && steps.gate.outputs.should_deploy != 'true'
+        run: exit 1
