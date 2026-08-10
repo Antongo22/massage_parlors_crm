@@ -13,6 +13,13 @@ FROM base AS deps
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# Миграциям и воркеру нужны runtime-инструменты prisma/tsx, но не Playwright,
+# ESLint, TypeScript types и остальные dev-зависимости. Отдельный слой заметно
+# уменьшает образы, которые VPS должен скачать и распаковать.
+FROM base AS prod-deps
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
 # Генерация Prisma не зависит от Next.js. Выносим её в отдельную стадию,
 # чтобы образы миграций и воркера не тянули за собой тяжёлый `next build`.
 FROM base AS prisma-generated
@@ -90,14 +97,15 @@ CMD ["node", "server.js"]
 FROM base AS migration
 ENV NODE_ENV=production
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json package-lock.json prisma.config.ts ./
-COPY prisma ./prisma
-COPY --from=prisma-generated /app/generated ./generated
-
 RUN addgroup --system --gid 1001 nodejs \
- && adduser --system --uid 1001 prisma \
- && chown -R prisma:nodejs /app
+ && adduser --system --uid 1001 prisma
+
+# --chown при COPY не создаёт второй огромный слой, в отличие от последующего
+# `chown -R` по всему node_modules.
+COPY --from=prod-deps --chown=prisma:nodejs /app/node_modules ./node_modules
+COPY --chown=prisma:nodejs package.json package-lock.json prisma.config.ts ./
+COPY --chown=prisma:nodejs prisma ./prisma
+COPY --from=prisma-generated --chown=prisma:nodejs /app/generated ./generated
 
 USER prisma
 CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
@@ -113,16 +121,15 @@ FROM base AS worker
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json package-lock.json prisma.config.ts ./
-COPY prisma ./prisma
-COPY lib ./lib
-COPY worker ./worker
-COPY --from=prisma-generated /app/generated ./generated
-
 RUN addgroup --system --gid 1001 nodejs \
- && adduser --system --uid 1001 nodejs \
- && chown -R nodejs:nodejs /app
+ && adduser --system --uid 1001 nodejs
+
+COPY --from=prod-deps --chown=nodejs:nodejs /app/node_modules ./node_modules
+COPY --chown=nodejs:nodejs package.json package-lock.json prisma.config.ts ./
+COPY --chown=nodejs:nodejs prisma ./prisma
+COPY --chown=nodejs:nodejs lib ./lib
+COPY --chown=nodejs:nodejs worker ./worker
+COPY --from=prisma-generated --chown=nodejs:nodejs /app/generated ./generated
 
 USER nodejs
 

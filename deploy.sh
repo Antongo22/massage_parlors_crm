@@ -98,6 +98,51 @@ require_docker() {
   docker info >/dev/null 2>&1 || fail "Docker-демон не запущен или нет прав. Попробуйте: sudo ./deploy.sh"
 }
 
+docker_free_mb() {
+  local docker_root
+  docker_root=$(docker info --format '{{.DockerRootDir}}')
+  df -Pm "$docker_root" | awk 'NR == 2 { print $4 }'
+}
+
+cleanup_deploy_cache() {
+  local image_prefix image_tag current_app current_migration current_worker ref free_before free_after
+  free_before=$(docker_free_mb)
+
+  # Предыдущая локальная сборка может оставить десятки гигабайт BuildKit cache.
+  # Кэш не содержит пользовательских данных и влияет только на скорость будущей
+  # сборки. Volumes (включая PostgreSQL и Redis) здесь не удаляются.
+  if (( free_before < 8192 )); then
+    info "На диске свободно ${free_before} МБ — очищаем Docker build-cache"
+    docker builder prune --all --force >/dev/null || true
+    docker image prune --force >/dev/null || true
+  fi
+
+  image_prefix=$(sed -n 's/^IMAGE_PREFIX=//p' "$ENV_FILE" | tail -n 1)
+  image_tag=$(sed -n 's/^IMAGE_TAG=//p' "$ENV_FILE" | tail -n 1)
+
+  if [[ -n "$image_prefix" && -n "$image_tag" ]]; then
+    current_app="${image_prefix}-app:${image_tag}"
+    current_migration="${image_prefix}-migration:${image_tag}"
+    current_worker="${image_prefix}-worker:${image_tag}"
+
+    # Удаляем только неиспользуемые старые образы этого CRM. Образ, занятый
+    # работающим контейнером, Docker не удалит; другие проекты не затрагиваются.
+    while IFS= read -r ref; do
+      case "$ref" in
+        "${image_prefix}-app:"*|"${image_prefix}-migration:"*|"${image_prefix}-worker:"*)
+          if [[ "$ref" != "$current_app" && "$ref" != "$current_migration" && "$ref" != "$current_worker" ]]; then
+            docker image rm "$ref" >/dev/null 2>&1 || true
+          fi
+          ;;
+      esac
+    done < <(docker image ls --format '{{.Repository}}:{{.Tag}}')
+  fi
+
+  free_after=$(docker_free_mb)
+  info "После очистки свободно ${free_after} МБ"
+  (( free_after >= 2048 )) || fail "Недостаточно места для production-образов: свободно ${free_after} МБ. Увеличьте диск VPS или удалите ненужные данные."
+}
+
 generate_secret() {
   # openssl есть в любой системе, где стоит Docker; fallback на /dev/urandom
   # для минимальных образов вроде Alpine без openssl.
@@ -187,6 +232,7 @@ main() {
   prebuilt_images=$(sed -n 's/^PREBUILT_IMAGES=//p' "$ENV_FILE" | tail -n 1)
 
   if [[ "$prebuilt_images" == "true" ]]; then
+    cleanup_deploy_cache
     info "Скачиваем проверенные CI образы из container registry"
     $COMPOSE pull app worker migrate
   else
