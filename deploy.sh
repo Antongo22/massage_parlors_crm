@@ -33,15 +33,29 @@ generate_secret() {
   fi
 }
 
+# Значение для compose env-файла. Экранируем интерполяцию `$`, кавычки и
+# переводы строк: SMTP-пароль с пробелом или спецсимволом не должен ломать
+# файл окружения или неожиданно подставлять переменную хоста.
+dotenv_value() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\$/\$\$}"
+  value="${value//$'\n'/\\n}"
+  printf '"%s"' "$value"
+}
+
 create_env() {
   info "Первый запуск: настроим окружение"
   echo
 
   read -rp "Домен (например crm.example.com): " domain
   [[ -n "$domain" ]] || fail "Домен обязателен: без него не выпустить сертификат"
+  [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || fail "Домен содержит недопустимые символы"
 
   read -rp "Email для Let's Encrypt: " acme_email
   [[ -n "$acme_email" ]] || fail "Email обязателен: на него приходят уведомления о сертификате"
+  [[ "$acme_email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || fail "Некорректный email"
 
   echo
   info "SMTP можно настроить позже через интерфейс — просто нажмите Enter"
@@ -65,12 +79,12 @@ POSTGRES_DB=crm
 
 AUTH_SECRET=$(generate_secret)
 
-SMTP_HOST=$smtp_host
+SMTP_HOST=$(dotenv_value "$smtp_host")
 SMTP_PORT=${smtp_port:-587}
-SMTP_USER=$smtp_user
-SMTP_PASSWORD=$smtp_password
+SMTP_USER=$(dotenv_value "$smtp_user")
+SMTP_PASSWORD=$(dotenv_value "$smtp_password")
 SMTP_SECURE=$([[ "${smtp_port:-587}" == "465" ]] && echo true || echo false)
-MAIL_FROM=$mail_from
+MAIL_FROM=$(dotenv_value "$mail_from")
 EOF
 
   ok "Создан $ENV_FILE (права 600, секреты сгенерированы)"
@@ -85,8 +99,9 @@ main() {
     info "Найден $ENV_FILE — обновляем существующую установку"
   fi
 
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
+  local domain
+  domain=$(sed -n 's/^DOMAIN=//p' "$ENV_FILE" | tail -n 1)
+  [[ -n "$domain" ]] || fail "В $ENV_FILE не задан DOMAIN"
 
   mkdir -p backups
 
@@ -99,20 +114,28 @@ main() {
   $COMPOSE up -d --remove-orphans
 
   info "Ждём готовности приложения"
+  app_ready=false
   for _ in $(seq 1 60); do
     if $COMPOSE ps app --format json 2>/dev/null | grep -q '"Health":"healthy"'; then
+      app_ready=true
       break
     fi
     sleep 5
   done
 
+  if [[ "$app_ready" != "true" ]]; then
+    $COMPOSE ps >&2 || true
+    $COMPOSE logs --tail 100 app migrate >&2 || true
+    fail "Приложение не стало healthy за 5 минут"
+  fi
+
   echo
   ok "Готово"
   echo
-  echo "  Первичная настройка: https://${DOMAIN}/setup"
+  echo "  Первичная настройка: https://${domain}/setup"
   echo
   echo "  Сертификат Let's Encrypt выпускается автоматически при первом"
-  echo "  обращении к домену. Убедитесь, что A-запись ${DOMAIN} указывает"
+  echo "  обращении к домену. Убедитесь, что A-запись ${domain} указывает"
   echo "  на этот сервер, а порты 80 и 443 открыты."
   echo
   echo "  Логи:      docker compose -f docker-compose.prod.yml logs -f"

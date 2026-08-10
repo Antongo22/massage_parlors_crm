@@ -5,6 +5,7 @@ import { DomainError } from "@/lib/domain/errors";
 import {
   consumeSubscriptionSession,
   countActiveUsages,
+  refundSubscription,
   releaseSubscriptionSession,
   reserveSubscriptionSession,
 } from "@/lib/services/subscriptions";
@@ -226,6 +227,41 @@ describe("конкурентный резерв последнего сеанс�
     });
 
     expect(countActiveUsages(usages)).toBe(1);
+  });
+});
+
+describe("конкурентный возврат", () => {
+  it("не позволяет сумме параллельных возвратов превысить продажу", async () => {
+    const subscription = await createSubscription(5);
+
+    await prisma.payment.create({
+      data: {
+        clientId: fx.clientId,
+        subscriptionId: subscription.id,
+        kind: "SALE",
+        amountMinor: 1_000,
+        method: "CARD",
+        paidAt: new Date(),
+      },
+    });
+
+    const attempt = () =>
+      refundSubscription({
+        subscriptionId: subscription.id,
+        amountMinor: 1_000,
+        actorUserId: null,
+      });
+    const results = await Promise.allSettled([attempt(), attempt()]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+
+    const refunded = await prisma.payment.aggregate({
+      where: { subscriptionId: subscription.id, kind: "REFUND" },
+      _sum: { amountMinor: true },
+    });
+
+    expect(refunded._sum.amountMinor).toBe(1_000);
   });
 });
 

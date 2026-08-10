@@ -82,6 +82,17 @@ export async function enqueueReminder(
 
   if (delay <= 0) return;
 
+  await enqueueReminderAt(appointmentId, scheduledFor, now);
+}
+
+/** Ставит задачу на сохранённый момент; просроченную — немедленно. */
+export async function enqueueReminderAt(
+  appointmentId: string,
+  scheduledFor: Date,
+  now: Date = new Date(),
+): Promise<void> {
+  const delay = Math.max(0, scheduledFor.getTime() - now.getTime());
+
   const queue = getReminderQueue();
   const jobId = reminderJobId(appointmentId);
 

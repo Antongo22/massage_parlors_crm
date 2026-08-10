@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin, requireUser } from "@/lib/auth-guards";
+import { getCurrentClient, requireAdmin, requireUser } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
 import { getOrCreateConversation, markRead, sendMessage } from "@/lib/services/chat";
 
@@ -58,6 +58,21 @@ export async function openConversation(clientId: string): Promise<string> {
 
 export async function markConversationRead(conversationId: string): Promise<void> {
   const user = await requireUser();
+
+  if (user.role === "CLIENT") {
+    const [client, conversation] = await Promise.all([
+      getCurrentClient(),
+      prisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: { clientId: true },
+      }),
+    ]);
+
+    if (!client || !conversation || conversation.clientId !== client.id) {
+      throw new Error("Нет доступа к этому диалогу");
+    }
+  }
+
   await markRead(conversationId, user.role);
   revalidatePath("/chat");
 }

@@ -27,7 +27,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
 
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:8080",
     locale: "ru-RU",
     timezoneId: "Europe/Moscow",
     trace: "retain-on-failure",

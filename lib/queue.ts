@@ -19,7 +19,7 @@ export type ReminderJob = {
 };
 
 export type MaintenanceJob = {
-  kind: "expire-subscriptions" | "notify-expiring-subscriptions";
+  kind: "expire-subscriptions" | "notify-expiring-subscriptions" | "reconcile-reminders";
 };
 
 let connection: IORedis | null = null;

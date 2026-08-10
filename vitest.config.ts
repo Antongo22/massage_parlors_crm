@@ -14,6 +14,12 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.spec.ts"],
     globalSetup: ["tests/db/global-setup.ts"],
+    // Сервисы приложения используют DATABASE_URL, а низкоуровневые тесты —
+    // TEST_DATABASE_URL. В тестовом процессе обе должны указывать на отдельную
+    // тестовую БД, иначе service-level тест случайно тронет базу разработчика.
+    env: {
+      DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+    },
     // Тесты БД делят одну базу и чистят таблицы между кейсами.
     // Параллельные файлы вычищали бы данные друг у друга.
     fileParallelism: false,

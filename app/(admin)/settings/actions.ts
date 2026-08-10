@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth-guards";
-import { encryptSecret } from "@/lib/crypto";
+import { encryptSecret, tryDecryptSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
 import { sendTestMail } from "@/lib/mail";
 
@@ -80,13 +80,16 @@ export async function sendSettingsTestMail(
   }
 
   const input = parsed.data;
+  const organization = await prisma.organization.findFirst({
+    select: { smtpPassword: true },
+  });
 
   const settings = input.smtpHost
     ? {
         host: input.smtpHost,
         port: input.smtpPort!,
         user: input.smtpUser || null,
-        password: input.smtpPassword || null,
+        password: input.smtpPassword || tryDecryptSecret(organization?.smtpPassword ?? null),
         secure: input.smtpSecure,
         from: input.mailFrom!,
         source: "database" as const,

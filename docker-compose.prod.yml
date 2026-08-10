@@ -59,13 +59,13 @@ services:
   migrate:
     build:
       context: .
-      target: runner
+      target: migration
     environment: *app-env
     depends_on:
       postgres:
         condition: service_healthy
     # Только deploy: dev-команды на проде недопустимы, они умеют ронять данные.
-    command: ["npx", "prisma", "migrate", "deploy"]
+    command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
     restart: "no"
 
   app:

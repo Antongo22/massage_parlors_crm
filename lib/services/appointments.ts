@@ -75,13 +75,31 @@ export async function createAppointment(input: CreateAppointmentInput) {
   const now = new Date();
   const organization = await requireOrganization();
 
-  const service = await prisma.service.findUniqueOrThrow({
-    where: { id: input.serviceId },
-    select: { id: true, name: true, priceMinor: true, durationMinutes: true, isActive: true },
-  });
+  const [service, master, client] = await Promise.all([
+    prisma.service.findUnique({
+      where: { id: input.serviceId },
+      select: { id: true, name: true, priceMinor: true, durationMinutes: true, isActive: true },
+    }),
+    prisma.master.findUnique({
+      where: { id: input.masterId },
+      select: { isActive: true },
+    }),
+    prisma.client.findFirst({
+      where: { id: input.clientId, archivedAt: null },
+      select: { id: true },
+    }),
+  ]);
 
-  if (!service.isActive) {
+  if (!service?.isActive) {
     throw new DomainError("NOT_FOUND", "Услуга снята с продажи");
+  }
+
+  if (!master?.isActive) {
+    throw new DomainError("NOT_FOUND", "Мастер недоступен для записи");
+  }
+
+  if (!client) {
+    throw new DomainError("NOT_FOUND", "Клиент не найден или находится в архиве");
   }
 
   const date = toLocalDate(input.startsAt, organization.timezone);
@@ -215,6 +233,18 @@ export async function transitionAppointment(input: TransitionInput) {
   const organization = await requireOrganization();
 
   const updated = await prisma.$transaction(async (tx) => {
+    // Переход состояния — read/modify/write. Без блокировки два параллельных
+    // запроса успевали оба увидеть CONFIRMED и создать две оплаты/две неявки.
+    // После FOR UPDATE второй запрос перечитает уже изменённый статус и будет
+    // отвергнут машиной состояний.
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM "Appointment" WHERE id = ${input.appointmentId} FOR UPDATE
+    `;
+
+    if (locked.length === 0) {
+      throw new DomainError("NOT_FOUND", "Запись не найдена");
+    }
+
     const appointment = await tx.appointment.findUnique({
       where: { id: input.appointmentId },
       include: { usage: true },

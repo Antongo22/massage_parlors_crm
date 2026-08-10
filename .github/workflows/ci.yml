@@ -28,6 +28,8 @@ jobs:
 
       - run: npm ci
 
+      - run: npm audit --omit=dev --audit-level=high
+
       # Клиент Prisma не коммитится, но без него не проходит проверка типов:
       # доменный слой типизирован сгенерированными моделями.
       - run: npx prisma generate
@@ -42,6 +44,14 @@ jobs:
           # но переменная должна существовать, иначе падает инициализация клиента.
           DATABASE_URL: postgresql://crm:crm@localhost:5432/crm?schema=public
           AUTH_SECRET: ci-build-secret-not-used-at-runtime
+
+      # `next build` не проверяет COPY и состав production-образов. Именно
+      # эта проверка ловит несуществующие каталоги и отсутствующий Prisma CLI.
+      - run: docker build --target runner -t massage-crm:ci .
+
+      - run: docker build --target migration -t massage-crm-migration:ci .
+
+      - run: docker run --rm massage-crm-migration:ci ./node_modules/.bin/prisma --version
 
   tests:
     name: Тесты домена и БД
@@ -147,6 +157,7 @@ jobs:
       SMTP_SECURE: "false"
       MAIL_FROM: CRM <noreply@example.com>
       E2E_BASE_URL: http://localhost:3000
+      PORT: "3000"
       MAILPIT_URL: http://localhost:8025
       DISABLE_NOTIFICATIONS: "true"
 

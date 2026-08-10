@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
 import { isDomainError } from "@/lib/domain/errors";
-import { sellSubscription } from "@/lib/services/subscriptions";
+import { refundSubscription as refundSubscriptionService, sellSubscription } from "@/lib/services/subscriptions";
 
 export type SubscriptionActionState = { error?: string; ok?: boolean };
 
@@ -112,60 +112,10 @@ export async function refundSubscription(
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      const subscription = await tx.subscription.findUniqueOrThrow({
-        where: { id: subscriptionId },
-        include: { payments: { where: { kind: "SALE" } } },
-      });
-
-      const sale = subscription.payments[0];
-
-      if (!sale) {
-        throw new Error("Не найдена исходная продажа абонемента");
-      }
-
-      const alreadyRefunded = await tx.payment.aggregate({
-        where: { refundedPaymentId: sale.id, kind: "REFUND" },
-        _sum: { amountMinor: true },
-      });
-
-      // Инвариант «сумма возвратов не больше продажи» агрегатный, поэтому
-      // констрейнтом не выражается — держим его здесь, под блокировкой строки.
-      if ((alreadyRefunded._sum.amountMinor ?? 0) + amountMinor > sale.amountMinor) {
-        throw new Error("Сумма возвратов превышает сумму продажи");
-      }
-
-      await tx.payment.create({
-        data: {
-          clientId: subscription.clientId,
-          subscriptionId: subscription.id,
-          refundedPaymentId: sale.id,
-          kind: "REFUND",
-          amountMinor,
-          method: sale.method,
-          paidAt: new Date(),
-        },
-      });
-
-      await tx.subscriptionUsage.updateMany({
-        where: { subscriptionId: subscription.id, state: "RESERVED" },
-        data: { state: "REVERTED", revertedAt: new Date() },
-      });
-
-      await tx.subscription.update({
-        where: { id: subscription.id },
-        data: { status: "REFUNDED" },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          actorUserId: admin.id,
-          entity: "Subscription",
-          entityId: subscription.id,
-          action: "refund",
-          diff: { amountMinor },
-        },
-      });
+    await refundSubscriptionService({
+      subscriptionId,
+      amountMinor,
+      actorUserId: admin.id,
     });
   } catch (error) {
     return {
