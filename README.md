@@ -5,7 +5,7 @@ CRM для частного массажного кабинета: запись 
 поднимает всё, включая базу, очередь, почтовый сервер и воркер уведомлений.
 
 ```bash
-git clone <repo> && cd massage_parlors_crm
+git clone https://github.com/Antongo22/massage_parlors_crm && cd massage_parlors_crm
 cp .env.example .env
 docker compose up
 ```
