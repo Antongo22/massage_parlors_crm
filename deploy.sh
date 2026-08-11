@@ -23,8 +23,39 @@ run_privileged() {
   elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
     sudo -n "$@"
   else
-    fail "Для установки Docker Compose нужны root-права. Запустите: sudo ./deploy.sh"
+    fail "Для установки Docker нужны root-права. Запустите: sudo ./deploy.sh"
   fi
+}
+
+install_docker_engine() {
+  command -v docker >/dev/null 2>&1 && return
+
+  info "Docker Engine не найден — устанавливаем"
+
+  # Используем системный пакет: он получает обновления безопасности вместе с
+  # ОС и не требует исполнения скачанного shell-скрипта от root. Названия
+  # пакетов различаются между Debian/Ubuntu и RHEL-подобными системами.
+  if command -v apt-get >/dev/null 2>&1; then
+    run_privileged apt-get update
+    run_privileged apt-get install -y docker.io ca-certificates curl
+  elif command -v dnf >/dev/null 2>&1; then
+    run_privileged dnf install -y docker ca-certificates curl
+  elif command -v yum >/dev/null 2>&1; then
+    run_privileged yum install -y docker ca-certificates curl
+  else
+    fail "Автоматическая установка Docker поддерживает apt, dnf и yum. Установите Docker Engine вручную и повторите запуск"
+  fi
+
+  # В контейнерной среде systemd может отсутствовать; в обычной VPS команда
+  # включает автозапуск после перезагрузки и сразу поднимает daemon.
+  if command -v systemctl >/dev/null 2>&1; then
+    run_privileged systemctl enable --now docker
+  elif command -v service >/dev/null 2>&1; then
+    run_privileged service docker start
+  fi
+
+  command -v docker >/dev/null 2>&1 || fail "Пакет Docker установлен, но команда docker недоступна"
+  ok "Установлен $(docker --version)"
 }
 
 install_compose_plugin() {
@@ -93,7 +124,7 @@ install_compose_plugin() {
 }
 
 require_docker() {
-  command -v docker >/dev/null 2>&1 || fail "Docker не установлен. Инструкция: https://docs.docker.com/engine/install/"
+  install_docker_engine
   install_compose_plugin
   docker info >/dev/null 2>&1 || fail "Docker-демон не запущен или нет прав. Попробуйте: sudo ./deploy.sh"
 }

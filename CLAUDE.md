@@ -16,6 +16,7 @@ npm run test:e2e                # Playwright, нужно поднятое при
 npm run lint && npm run typecheck
 npm run db:migration -- <имя> <файл-в-prisma/sql>
 DISABLE_NOTIFICATIONS=true npm run db:seed   # ВНИМАНИЕ: очищает базу
+npm run db:demo-fill               # недеструктивно наполняет стенд для демонстрации
 ```
 
 Перед коммитом должны проходить `lint`, `typecheck`, `test` и `build`.
@@ -50,6 +51,10 @@ app           транспорт: валидация → вызов сервис
 **Не добавлять поле `remaining` в абонемент.** Остаток считается по журналу
 `SubscriptionUsage`. Счётчик рассинхронизируется при первой же отмене
 или ретрае задачи.
+
+**Планы абонементов — только на 5/10 сеансов и обязательно со скидкой.**
+Количество защищает CHECK `subscription_plan_package_rules`, скидку относительно
+цены услуги — `validateSubscriptionPlan`. Одна проверка не заменяет другую.
 
 **Не считать выручку по `Appointment.priceMinorSnapshot`.** Только по журналу
 `Payment`. Абонемент оплачен один раз, визитов по нему несколько.

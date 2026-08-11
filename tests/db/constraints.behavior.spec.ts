@@ -338,6 +338,36 @@ describe("SubscriptionUsage", () => {
   });
 });
 
+describe("SubscriptionPlan", () => {
+  const insertPlan = (sessionsCount: number, priceMinor: number) =>
+    pool.query(
+      `INSERT INTO "SubscriptionPlan"
+         (id, "serviceId", name, "sessionsCount", "priceMinor", "validityDays", "isActive", "createdAt", "updatedAt")
+       VALUES ($1, $2, 'Тестовый пакет', $3, $4, 180, true, now(), now())`,
+      [id(), fx.serviceId, sessionsCount, priceMinor],
+    );
+
+  it.each([5, 10])("разрешает пакет на %i сеансов", async (sessionsCount) => {
+    await expect(insertPlan(sessionsCount, 1_500_000)).resolves.toBeDefined();
+  });
+
+  it("отвергает пакет с другим количеством сеансов", async () => {
+    await expectViolation(
+      insertPlan(6, 1_500_000),
+      PG.CHECK_VIOLATION,
+      "subscription_plan_package_rules",
+    );
+  });
+
+  it("отвергает бесплатный пакет", async () => {
+    await expectViolation(
+      insertPlan(5, 0),
+      PG.CHECK_VIOLATION,
+      "subscription_plan_package_rules",
+    );
+  });
+});
+
 describe("NotificationLog", () => {
   it("отвергает повторное уведомление того же типа по тому же визиту", async () => {
     const appointmentId = id();

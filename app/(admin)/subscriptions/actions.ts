@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
 import { isDomainError } from "@/lib/domain/errors";
+import { validateSubscriptionPlan } from "@/lib/domain/subscription-plan";
 import { refundSubscription as refundSubscriptionService, sellSubscription } from "@/lib/services/subscriptions";
 
 export type SubscriptionActionState = { error?: string; ok?: boolean };
@@ -51,8 +52,8 @@ const planSchema = z.object({
   id: z.string().optional(),
   serviceId: z.string().min(1, "Выберите услугу"),
   name: z.string().trim().min(2, "Укажите название").max(160),
-  sessionsCount: z.number().int().min(2).max(100),
-  priceMinor: z.number().int().min(0),
+  sessionsCount: z.union([z.literal(5), z.literal(10)]),
+  priceMinor: z.number().int().positive(),
   validityDays: z.number().int().min(1).max(1095),
   isActive: z.boolean(),
 });
@@ -79,12 +80,36 @@ export async function savePlan(
 
   const { id, ...data } = parsed.data;
 
-  // Уже проданные абонементы не меняются: у них снимок количества сеансов
-  // и уплаченной цены. Правка плана влияет только на будущие продажи.
-  if (id) {
-    await prisma.subscriptionPlan.update({ where: { id }, data });
-  } else {
-    await prisma.subscriptionPlan.create({ data });
+  try {
+    await prisma.$transaction(async (tx) => {
+      const service = await tx.service.findUnique({
+        where: { id: data.serviceId },
+        select: { priceMinor: true },
+      });
+
+      if (!service) {
+        throw new Error("Услуга не найдена");
+      }
+
+      validateSubscriptionPlan({
+        sessionsCount: data.sessionsCount,
+        priceMinor: data.priceMinor,
+        servicePriceMinor: service.priceMinor,
+      });
+
+      // Уже проданные абонементы не меняются: у них снимок количества сеансов
+      // и уплаченной цены. Правка плана влияет только на будущие продажи.
+      if (id) {
+        await tx.subscriptionPlan.update({ where: { id }, data });
+      } else {
+        await tx.subscriptionPlan.create({ data });
+      }
+    });
+  } catch (error) {
+    if (isDomainError(error)) return { error: error.message };
+
+    console.error("Не удалось сохранить пакет абонемента", error);
+    return { error: error instanceof Error ? error.message : "Не удалось сохранить пакет" };
   }
 
   revalidatePath("/subscriptions");

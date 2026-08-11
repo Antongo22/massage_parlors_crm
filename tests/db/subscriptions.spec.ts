@@ -37,11 +37,14 @@ afterAll(async () => {
 });
 
 async function createSubscription(sessions = 5, overrides: { expiresAt?: Date } = {}) {
+  // Планы в продукте бывают только на 5/10 сеансов. Параметр sessions здесь
+  // меняет снимок уже проданного абонемента, чтобы компактно проверить
+  // последний сеанс и ретраи без создания пяти записей в каждом тесте.
   const plan = await prisma.subscriptionPlan.create({
     data: {
       serviceId: fx.serviceId,
-      name: `Абонемент на ${sessions}`,
-      sessionsCount: sessions,
+      name: "Абонемент на 5 сеансов",
+      sessionsCount: 5,
       priceMinor: 1_500_000,
       validityDays: 180,
     },

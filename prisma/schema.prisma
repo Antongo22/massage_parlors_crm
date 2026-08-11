@@ -406,6 +406,8 @@ model SubscriptionPlan {
   id            String  @id @default(cuid())
   serviceId     String
   name          String
+  /// Только 5 или 10: CHECK subscription_plan_package_rules не позволяет
+  /// обойти это правило прямой вставкой или будущим API.
   sessionsCount Int
   /// Цена пакета со скидкой. Процент скидки не хранится — он производный
   /// от priceMinor и текущей цены услуги.

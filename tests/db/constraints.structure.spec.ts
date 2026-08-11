@@ -54,6 +54,9 @@ const EXPECTED_CONSTRAINTS: Record<string, string> = {
     `CHECK (((("consumedAt" IS NULL) OR ("consumedAt" >= "reservedAt")) ` +
     `AND (("revertedAt" IS NULL) OR ("revertedAt" >= "reservedAt"))))`,
 
+  subscription_plan_package_rules:
+    `CHECK ((("sessionsCount" = ANY (ARRAY[5, 10])) AND ("priceMinor" > 0)))`,
+
   notification_subject_valid:
     `CHECK ((((type = ANY (ARRAY['REMINDER_2H'::"NotificationType", 'BOOKING_CONFIRMED'::"NotificationType", 'CANCELLED'::"NotificationType"])) ` +
     `AND ("appointmentId" IS NOT NULL) AND ("subscriptionId" IS NULL)) ` +

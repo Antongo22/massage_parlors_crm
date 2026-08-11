@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { discountPercent, formatMoney, minorToInput } from "@/lib/domain/money";
+import { SUBSCRIPTION_SESSION_COUNTS } from "@/lib/domain/subscription-plan";
 
 type Plan = {
   id: string;
@@ -116,15 +117,20 @@ export function PlanDialog({
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="sessionsCount">Сеансов</Label>
-                <Input
+                <select
                   id="sessionsCount"
                   name="sessionsCount"
-                  type="number"
-                  min={2}
                   value={sessions}
                   onChange={(event) => setSessions(Number(event.target.value))}
+                  className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
                   required
-                />
+                >
+                  {SUBSCRIPTION_SESSION_COUNTS.map((count) => (
+                    <option key={count} value={count}>
+                      {count}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="space-y-2">
@@ -133,7 +139,7 @@ export function PlanDialog({
                   id="price"
                   name="price"
                   type="number"
-                  min={0}
+                  min={0.01}
                   step="0.01"
                   value={price || ""}
                   onChange={(event) => setPrice(Number(event.target.value))}
