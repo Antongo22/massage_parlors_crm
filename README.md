@@ -282,12 +282,22 @@ docker compose up
 ### Шаг 3. Демонстрационные данные
 
 Чтобы увидеть систему с наполненными дашбордом и финансами, а не пустыми
-экранами:
+экранами, откройте терминал в папке проекта и выполните:
 
 ```bash
-npm install
-DISABLE_NOTIFICATIONS=true npm run db:seed
+docker compose up -d
+docker compose run --rm -e DISABLE_NOTIFICATIONS=true migrate npm run db:seed
 ```
+
+Устанавливать Node.js и PostgreSQL на компьютер не нужно — команда выполняется
+в Docker. Дождитесь строки:
+
+```text
+Готово: 10 клиентов, 6 услуг, 30 записей, 5 абонементов
+```
+
+После этого откройте приложение: http://localhost:8080. Письма со ссылками
+для входа находятся в Mailpit: http://localhost:8025.
 
 Создаст 10 клиентов, 6 услуг, 30 записей (часть в прошлом — с оплатами,
 неявками и отменами; часть на ближайшие дни), 5 абонементов со списаниями
@@ -298,6 +308,21 @@ DISABLE_NOTIFICATIONS=true npm run db:seed
 
 После сида администратор — `admin@example.com`, входить так же, через письмо
 в Mailpit.
+
+Если приложение запущено без Docker, ту же операцию можно выполнить так:
+
+```bash
+npm install
+DISABLE_NOTIFICATIONS=true npm run db:seed
+```
+
+На VPS с уже пройденным wizard полный seed запускать нельзя: он удалит
+настройки. Для такого стенда используйте безопасное наполнение:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production \
+  run --rm migrate npm run db:demo-fill
+```
 
 ### Шаг 4. Вход под клиентом
 
