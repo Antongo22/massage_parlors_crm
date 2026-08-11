@@ -6,11 +6,9 @@ import { getOrganization } from "@/lib/services/organization";
 /**
  * Почтовый транспорт.
  *
- * Источников настроек два, и порядок важен: сначала база (их задал владелец
- * салона в wizard), потом переменные окружения. Env — это режим первого
- * запуска, когда организации ещё нет, и запасной вариант, если настройки
- * почты в wizard пропустили. Обратный порядок означал бы, что заданное
- * в интерфейсе молча игнорируется.
+ * Порядок источников важен: сначала база (реальный SMTP, заданный владельцем),
+ * затем закрытый Mailpit и только потом legacy SMTP из окружения. Обратный
+ * порядок означал бы, что выбранное в интерфейсе молча игнорируется.
  */
 
 export type MailSettings = {
@@ -20,8 +18,48 @@ export type MailSettings = {
   password: string | null;
   secure: boolean;
   from: string;
-  source: "database" | "environment";
+  source: "database" | "environment" | "mailpit";
 };
+
+/**
+ * Резервный транспорт для первичной настройки и тестового режима.
+ *
+ * В compose Mailpit задаётся отдельными переменными, поэтому старый
+ * SMTP_PORT=587 в production env не может случайно превратить адрес
+ * mailpit:1025 в mailpit:587. Если Mailpit в окружении отсутствует, сохраняем
+ * обратную совместимость с обычными SMTP_* переменными.
+ */
+export function resolveFallbackMailSettings(): MailSettings | null {
+  const mailpitHost = process.env.MAILPIT_SMTP_HOST?.trim();
+  const mailpitPort = Number(process.env.MAILPIT_SMTP_PORT ?? 1025);
+
+  if (mailpitHost && Number.isInteger(mailpitPort) && mailpitPort > 0) {
+    return {
+      host: mailpitHost,
+      port: mailpitPort,
+      user: null,
+      password: null,
+      secure: false,
+      from: process.env.MAILPIT_MAIL_FROM || "CRM (Mailpit) <noreply@mailpit.local>",
+      source: "mailpit",
+    };
+  }
+
+  const host = process.env.SMTP_HOST?.trim();
+  const port = Number(process.env.SMTP_PORT);
+
+  if (!host || !Number.isInteger(port) || port <= 0) return null;
+
+  return {
+    host,
+    port,
+    user: process.env.SMTP_USER || null,
+    password: process.env.SMTP_PASSWORD || null,
+    secure: process.env.SMTP_SECURE === "true",
+    from: process.env.MAIL_FROM || "CRM <noreply@localhost>",
+    source: "environment",
+  };
+}
 
 export async function resolveMailSettings(): Promise<MailSettings | null> {
   const organization = await getOrganization();
@@ -38,20 +76,7 @@ export async function resolveMailSettings(): Promise<MailSettings | null> {
     };
   }
 
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT);
-
-  if (!host || !Number.isInteger(port)) return null;
-
-  return {
-    host,
-    port,
-    user: process.env.SMTP_USER || null,
-    password: process.env.SMTP_PASSWORD || null,
-    secure: process.env.SMTP_SECURE === "true",
-    from: process.env.MAIL_FROM || "CRM <noreply@localhost>",
-    source: "environment",
-  };
+  return resolveFallbackMailSettings();
 }
 
 export function createTransport(settings: MailSettings): Transporter {
@@ -107,7 +132,7 @@ export async function sendMail(message: {
   const settings = await resolveMailSettings();
 
   if (!settings) {
-    return { ok: false, error: "Почта не настроена: нет ни настроек в базе, ни SMTP_HOST" };
+    return { ok: false, error: "Почта не настроена: выберите Mailpit или укажите SMTP" };
   }
 
   try {

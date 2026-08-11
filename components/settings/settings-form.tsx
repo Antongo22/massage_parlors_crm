@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import {
   saveSettings,
@@ -29,7 +29,16 @@ type OrganizationSettings = {
   hasStoredPassword: boolean;
 };
 
-export function SettingsForm({ organization }: { organization: OrganizationSettings }) {
+export function SettingsForm({
+  organization,
+  fallbackMailMode,
+}: {
+  organization: OrganizationSettings;
+  fallbackMailMode: "mailpit" | "environment" | null;
+}) {
+  const [useCustomSmtp, setUseCustomSmtp] = useState(
+    Boolean(organization.smtpHost) || !fallbackMailMode,
+  );
   const [saveState, saveAction, saving] = useActionState<SettingsState, FormData>(saveSettings, {});
   const [testState, testAction, testing] = useActionState<SettingsState, FormData>(
     sendSettingsTestMail,
@@ -132,60 +141,100 @@ export function SettingsForm({ organization }: { organization: OrganizationSetti
           <CardTitle>Почта</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-muted-foreground text-sm">
-            Пусто — используются переменные окружения. Заполнено — настройки берутся отсюда,
-            пароль хранится зашифрованным.
-          </p>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="smtpHost">Сервер</Label>
-              <Input id="smtpHost" name="smtpHost" defaultValue={organization.smtpHost ?? ""} />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="smtpPort">Порт</Label>
-              <Input
-                id="smtpPort"
-                name="smtpPort"
-                type="number"
-                defaultValue={organization.smtpPort ?? ""}
+          <div className="space-y-3">
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="radio"
+                name="mailMode"
+                value="mailpit"
+                checked={!useCustomSmtp}
+                onChange={() => setUseCustomSmtp(false)}
+                disabled={!fallbackMailMode}
+                className="accent-primary mt-0.5 size-4"
               />
-            </div>
+              <span>
+                {fallbackMailMode === "mailpit"
+                  ? "Тестовый режим — Mailpit"
+                  : "SMTP из окружения"}
+                <span className="text-muted-foreground block text-xs">
+                  {fallbackMailMode === "mailpit"
+                    ? "Все письма перехватываются внутри сервера и не доходят до клиентов."
+                    : fallbackMailMode === "environment"
+                      ? "Используются почтовые переменные окружения сервера."
+                      : "Резервный транспорт в окружении не настроен."}
+                </span>
+              </span>
+            </label>
 
-            <div className="flex items-end pb-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  name="smtpSecure"
-                  defaultChecked={organization.smtpSecure}
-                  className="border-input accent-primary size-4 rounded"
-                />
-                SSL/TLS
-              </label>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="smtpUser">Логин</Label>
-              <Input id="smtpUser" name="smtpUser" defaultValue={organization.smtpUser ?? ""} />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="smtpPassword">Пароль</Label>
-              <Input
-                id="smtpPassword"
-                name="smtpPassword"
-                type="password"
-                autoComplete="new-password"
-                placeholder={organization.hasStoredPassword ? "сохранён — оставьте пустым" : ""}
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="radio"
+                name="mailMode"
+                value="smtp"
+                checked={useCustomSmtp}
+                onChange={() => setUseCustomSmtp(true)}
+                className="accent-primary mt-0.5 size-4"
               />
-            </div>
-
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="mailFrom">Адрес отправителя</Label>
-              <Input id="mailFrom" name="mailFrom" defaultValue={organization.mailFrom ?? ""} />
-            </div>
+              <span>
+                Реальный SMTP
+                <span className="text-muted-foreground block text-xs">
+                  Письма доставляются клиентам, пароль хранится в зашифрованном виде.
+                </span>
+              </span>
+            </label>
           </div>
+
+          {useCustomSmtp && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="smtpHost">Сервер</Label>
+                <Input id="smtpHost" name="smtpHost" defaultValue={organization.smtpHost ?? ""} />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="smtpPort">Порт</Label>
+                <Input
+                  id="smtpPort"
+                  name="smtpPort"
+                  type="number"
+                  defaultValue={organization.smtpPort ?? ""}
+                />
+              </div>
+
+              <div className="flex items-end pb-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="smtpSecure"
+                    defaultChecked={organization.smtpSecure}
+                    className="border-input accent-primary size-4 rounded"
+                  />
+                  SSL/TLS
+                </label>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="smtpUser">Логин</Label>
+                <Input id="smtpUser" name="smtpUser" defaultValue={organization.smtpUser ?? ""} />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="smtpPassword">Пароль</Label>
+                <Input
+                  id="smtpPassword"
+                  name="smtpPassword"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={organization.hasStoredPassword ? "сохранён — оставьте пустым" : ""}
+                />
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="mailFrom">Адрес отправителя</Label>
+                <Input id="mailFrom" name="mailFrom" defaultValue={organization.mailFrom ?? ""} />
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-end gap-2">
             <div className="flex-1 space-y-2">
@@ -196,6 +245,11 @@ export function SettingsForm({ organization }: { organization: OrganizationSetti
               {testing ? "Отправка…" : "Отправить тестовое"}
             </Button>
           </div>
+          <p className="text-muted-foreground text-xs">
+            {useCustomSmtp
+              ? "Тест должен прийти на указанный адрес."
+              : "Письмо будет видно только в Mailpit; на указанный адрес оно не придёт."}
+          </p>
         </CardContent>
       </Card>
 

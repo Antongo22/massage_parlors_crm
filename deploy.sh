@@ -234,7 +234,7 @@ main() {
   if [[ "$prebuilt_images" == "true" ]]; then
     cleanup_deploy_cache
     info "Скачиваем проверенные CI образы из container registry"
-    $COMPOSE pull app worker migrate
+    $COMPOSE pull app worker migrate mailpit
   else
     info "Собираем образы (первый раз это несколько минут)"
     $COMPOSE build
@@ -286,6 +286,8 @@ main() {
   fi
   echo
   echo "  Логи:      docker compose -f docker-compose.prod.yml logs -f"
+  echo "  Mailpit:   ssh -L 8025:127.0.0.1:8025 <user>@<IP-сервера>"
+  echo "             затем откройте http://localhost:8025"
   echo "  Остановка: docker compose -f docker-compose.prod.yml down"
   echo "  Бэкап БД:  ./scripts/backup.sh"
   echo

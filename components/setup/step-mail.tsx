@@ -12,13 +12,13 @@ import { FieldError, FormAlert } from "@/components/setup/form-feedback";
 export function StepMail({
   adminEmail,
   catalogIsEmpty,
-  envMailConfigured,
+  fallbackMailMode,
 }: {
   adminEmail: string | null;
   catalogIsEmpty: boolean;
-  envMailConfigured: boolean;
+  fallbackMailMode: "mailpit" | "environment" | null;
 }) {
-  const [useCustomSmtp, setUseCustomSmtp] = useState(!envMailConfigured);
+  const [useCustomSmtp, setUseCustomSmtp] = useState(!fallbackMailMode);
 
   const [saveState, saveAction, saving] = useActionState<ActionState, FormData>(submitStep3, {});
   const [testState, testAction, testing] = useActionState<ActionState, FormData>(sendTestEmail, {});
@@ -38,17 +38,22 @@ export function StepMail({
               <input
                 type="radio"
                 name="mailMode"
+                value="mailpit"
                 checked={!useCustomSmtp}
                 onChange={() => setUseCustomSmtp(false)}
-                disabled={!envMailConfigured}
+                disabled={!fallbackMailMode}
                 className="accent-primary mt-0.5 size-4"
               />
               <span>
-                Использовать настройки окружения
+                {fallbackMailMode === "mailpit"
+                  ? "Тестовый режим — перехватывать письма в Mailpit"
+                  : "Использовать SMTP из окружения"}
                 <span className="text-muted-foreground block text-xs">
-                  {envMailConfigured
-                    ? "SMTP задан в переменных окружения. Для локальной разработки это Mailpit: письма никуда не уходят и видны на localhost:8025."
-                    : "Недоступно: SMTP_HOST в окружении не задан."}
+                  {fallbackMailMode === "mailpit"
+                    ? "Письма не доставляются клиентам, а сохраняются в закрытом тестовом ящике. Переключиться на реальный SMTP можно в любой момент."
+                    : fallbackMailMode === "environment"
+                      ? "Используются SMTP_HOST и остальные почтовые переменные окружения."
+                      : "Недоступно: резервный почтовый транспорт не настроен."}
                 </span>
               </span>
             </label>
@@ -57,6 +62,7 @@ export function StepMail({
               <input
                 type="radio"
                 name="mailMode"
+                value="smtp"
                 checked={useCustomSmtp}
                 onChange={() => setUseCustomSmtp(true)}
                 className="accent-primary mt-0.5 size-4"
@@ -148,8 +154,9 @@ export function StepMail({
               </Button>
             </div>
             <p className="text-muted-foreground text-xs">
-              Проверьте почту до завершения настройки: иначе нерабочий SMTP обнаружится
-              на первом напоминании клиенту.
+              {useCustomSmtp
+                ? "Проверьте почту до завершения настройки: иначе нерабочий SMTP обнаружится на первом напоминании клиенту."
+                : "В тестовом режиме письмо появится в Mailpit и не будет доставлено на указанный адрес."}
             </p>
             <FieldError state={testState} field="testEmail" />
           </div>

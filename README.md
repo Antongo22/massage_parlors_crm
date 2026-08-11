@@ -411,12 +411,17 @@ POSTGRES_USER=crm
 POSTGRES_PASSWORD=replace-with-a-long-alphanumeric-password
 POSTGRES_DB=crm
 AUTH_SECRET=replace-with-openssl-rand-base64-32
-SMTP_HOST=smtp.example.com
+# Необязательно: без этих значений wizard предложит закрытый Mailpit.
+# Настоящий SMTP удобнее задать позже через интерфейс.
+SMTP_HOST=
 SMTP_PORT=587
-SMTP_USER=user
-SMTP_PASSWORD=password
+SMTP_USER=
+SMTP_PASSWORD=
 SMTP_SECURE=false
-MAIL_FROM="CRM <noreply@example.com>"
+MAIL_FROM=
+MAILPIT_UI_PORT=8025
+MAILPIT_MAX_MESSAGES=1000
+MAILPIT_MAX_AGE=30d
 ```
 
 `SSH_HOST`, `SSH_USERNAME`, `SSH_PORT`, `DEPLOY_PATH`, `PUBLIC_URL` можно задать
@@ -426,13 +431,32 @@ MAIL_FROM="CRM <noreply@example.com>"
 
 Бэкап базы — `./scripts/backup.sh` (хранит последние 14 дампов).
 
+### Production Mailpit
+
+В production Mailpit поднимается автоматически и доступен в wizard как
+**тестовый режим**. В нём письма, напоминания и ссылки входа не уходят клиентам,
+а сохраняются в отдельном Docker volume. Интерфейс намеренно слушает только
+loopback VPS: публикация тестового ящика раскрыла бы ссылки авторизации.
+
+Откройте защищённый туннель со своего компьютера:
+
+```bash
+ssh -L 8025:127.0.0.1:8025 root@83.217.203.34
+```
+
+Пока SSH-сессия открыта, Mailpit доступен на http://localhost:8025. Порт 8025
+не нужно открывать в firewall. Хранится до 1000 писем не старше 30 дней; лимиты
+меняются через `MAILPIT_MAX_MESSAGES` и `MAILPIT_MAX_AGE` в `PRODUCTION_ENV`.
+
 ## Подключение настоящей почты
 
-Локально письма перехватывает Mailpit. Для боевой отправки нужен внешний SMTP —
-свой почтовый сервер на новом VPS почти гарантированно попадёт в спам.
+Локально и в тестовом production-режиме письма перехватывает Mailpit. Для
+доставки клиентам нужен внешний SMTP — свой почтовый сервер на новом VPS почти
+гарантированно попадёт в спам.
 
-Настройки задаются в интерфейсе (**Настройки → Почта**) и сохраняются
-в базе, пароль — в зашифрованном виде. Менять их можно без доступа к серверу.
+Режим выбирается в первичном wizard и позже переключается в интерфейсе
+(**Настройки → Почта**). Настройки реального SMTP сохраняются в базе, пароль —
+в зашифрованном виде. Перезапуск или доступ к серверу не нужны.
 
 | Провайдер | Сервер | Порт | Примечание |
 |---|---|---|---|

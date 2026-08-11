@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth-guards";
 import { encryptSecret, tryDecryptSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
-import { sendTestMail } from "@/lib/mail";
+import { resolveFallbackMailSettings, sendTestMail } from "@/lib/mail";
 
 export type SettingsState = { error?: string; notice?: string };
 
@@ -56,7 +56,11 @@ export async function saveSettings(_prev: SettingsState, formData: FormData): Pr
       smtpUser: input.smtpHost ? input.smtpUser || null : null,
       // Пустое поле = «не менять»: сохранённый пароль в форме не показывается,
       // и правка соседнего поля не должна его стирать.
-      smtpPassword: input.smtpPassword ? encryptSecret(input.smtpPassword) : undefined,
+      smtpPassword: input.smtpHost
+        ? input.smtpPassword
+          ? encryptSecret(input.smtpPassword)
+          : undefined
+        : null,
       smtpSecure: input.smtpSecure,
       mailFrom: input.smtpHost ? input.mailFrom || null : null,
     },
@@ -94,28 +98,28 @@ export async function sendSettingsTestMail(
         from: input.mailFrom!,
         source: "database" as const,
       }
-    : {
-        host: process.env.SMTP_HOST ?? "",
-        port: Number(process.env.SMTP_PORT ?? 0),
-        user: process.env.SMTP_USER || null,
-        password: process.env.SMTP_PASSWORD || null,
-        secure: process.env.SMTP_SECURE === "true",
-        from: process.env.MAIL_FROM || "CRM <noreply@localhost>",
-        source: "environment" as const,
-      };
+    : resolveFallbackMailSettings();
 
-  if (!settings.host || !settings.port) {
+  if (!settings) {
     return { error: "Почта не настроена" };
   }
 
   const result = await sendTestMail(settings, to);
 
   return result.ok
-    ? { notice: `Письмо отправлено на ${to}` }
+    ? {
+        notice:
+          settings.source === "mailpit"
+            ? `Письмо для ${to} перехвачено Mailpit`
+            : `Письмо отправлено на ${to}`,
+      }
     : { error: `Не удалось отправить: ${result.error}` };
 }
 
 function readForm(formData: FormData) {
+  const mailMode = formData.get("mailMode");
+  const submittedHost = formData.get("smtpHost");
+  const useCustomSmtp = mailMode === "smtp" || (mailMode == null && Boolean(submittedHost));
   const port = formData.get("smtpPort");
 
   return {
@@ -126,11 +130,11 @@ function readForm(formData: FormData) {
     cancellationWindowHours: Number(formData.get("cancellationWindowHours")),
     reminderOffsetMinutes: Number(formData.get("reminderOffsetMinutes")),
     chargeSubscriptionOnNoShow: formData.get("chargeSubscriptionOnNoShow") === "on",
-    smtpHost: formData.get("smtpHost") || undefined,
-    smtpPort: port ? Number(port) : undefined,
-    smtpUser: formData.get("smtpUser") || undefined,
-    smtpPassword: formData.get("smtpPassword") || undefined,
-    smtpSecure: formData.get("smtpSecure") === "on",
-    mailFrom: formData.get("mailFrom") || undefined,
+    smtpHost: useCustomSmtp ? submittedHost || undefined : undefined,
+    smtpPort: useCustomSmtp && port ? Number(port) : undefined,
+    smtpUser: useCustomSmtp ? formData.get("smtpUser") || undefined : undefined,
+    smtpPassword: useCustomSmtp ? formData.get("smtpPassword") || undefined : undefined,
+    smtpSecure: useCustomSmtp && formData.get("smtpSecure") === "on",
+    mailFrom: useCustomSmtp ? formData.get("mailFrom") || undefined : undefined,
   };
 }

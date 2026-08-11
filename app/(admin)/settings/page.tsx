@@ -25,6 +25,13 @@ export default async function SettingsPage() {
       </header>
 
       <SettingsForm
+        fallbackMailMode={
+          process.env.MAILPIT_SMTP_HOST
+            ? "mailpit"
+            : process.env.SMTP_HOST
+              ? "environment"
+              : null
+        }
         organization={{
           name: organization.name,
           timezone: organization.timezone,

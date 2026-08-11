@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { sendTestMail } from "@/lib/mail";
+import { resolveFallbackMailSettings, sendTestMail } from "@/lib/mail";
 import { seedDemoCatalog } from "@/lib/services/demo-catalog";
 import {
   getSetupState,
@@ -166,37 +166,39 @@ export async function sendTestEmail(
         from: mailFrom!,
         source: "database" as const,
       }
-    : {
-        host: process.env.SMTP_HOST ?? "",
-        port: Number(process.env.SMTP_PORT ?? 0),
-        user: process.env.SMTP_USER || null,
-        password: process.env.SMTP_PASSWORD || null,
-        secure: process.env.SMTP_SECURE === "true",
-        from: process.env.MAIL_FROM || "CRM <noreply@localhost>",
-        source: "environment" as const,
-      };
+    : resolveFallbackMailSettings();
 
-  if (!settings.host || !settings.port) {
-    return { error: "Почта не настроена: заполните SMTP или задайте SMTP_HOST в окружении" };
+  if (!settings) {
+    return { error: "Почта не настроена: выберите Mailpit или заполните SMTP" };
   }
 
   const result = await sendTestMail(settings, recipient.data);
 
   return result.ok
-    ? { notice: `Письмо отправлено на ${recipient.data}` }
+    ? {
+        notice:
+          settings.source === "mailpit"
+            ? `Письмо для ${recipient.data} перехвачено Mailpit`
+            : `Письмо отправлено на ${recipient.data}`,
+      }
     : { error: `Не удалось отправить: ${result.error}` };
 }
 
 function parseMailForm(formData: FormData) {
+  const mailMode = formData.get("mailMode");
+  const submittedHost = formData.get("smtpHost");
+  // Формы старой версии не присылали mailMode. Для них наличие хоста по-прежнему
+  // означает собственный SMTP, чтобы обновление не ломало незавершённый wizard.
+  const useCustomSmtp = mailMode === "smtp" || (mailMode == null && Boolean(submittedHost));
   const port = formData.get("smtpPort");
 
   return step3Schema.safeParse({
-    smtpHost: formData.get("smtpHost") || undefined,
-    smtpPort: port ? Number(port) : undefined,
-    smtpUser: formData.get("smtpUser") || undefined,
-    smtpPassword: formData.get("smtpPassword") || undefined,
-    smtpSecure: formData.get("smtpSecure") === "on",
-    mailFrom: formData.get("mailFrom") || undefined,
+    smtpHost: useCustomSmtp ? submittedHost || undefined : undefined,
+    smtpPort: useCustomSmtp && port ? Number(port) : undefined,
+    smtpUser: useCustomSmtp ? formData.get("smtpUser") || undefined : undefined,
+    smtpPassword: useCustomSmtp ? formData.get("smtpPassword") || undefined : undefined,
+    smtpSecure: useCustomSmtp && formData.get("smtpSecure") === "on",
+    mailFrom: useCustomSmtp ? formData.get("mailFrom") || undefined : undefined,
     seedDemoData: formData.get("seedDemoData") === "on",
   });
 }

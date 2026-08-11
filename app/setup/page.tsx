@@ -43,7 +43,13 @@ export default async function SetupPage() {
         <StepMail
           adminEmail={state.adminEmail}
           catalogIsEmpty={await catalogIsEmpty()}
-          envMailConfigured={Boolean(process.env.SMTP_HOST)}
+          fallbackMailMode={
+            process.env.MAILPIT_SMTP_HOST
+              ? "mailpit"
+              : process.env.SMTP_HOST
+                ? "environment"
+                : null
+          }
         />
       )}
     </WizardShell>
