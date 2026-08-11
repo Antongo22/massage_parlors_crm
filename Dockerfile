@@ -13,11 +13,16 @@ FROM base AS deps
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Миграциям и воркеру нужны runtime-инструменты prisma/tsx, но не Playwright,
-# ESLint, TypeScript types и остальные dev-зависимости. Отдельный слой заметно
-# уменьшает образы, которые VPS должен скачать и распаковать.
-FROM base AS prod-deps
-COPY package.json package-lock.json ./
+# `--omit=dev` корневого package.json недостаточно: он исключает Playwright и
+# ESLint, но всё ещё ставит Next.js, React и весь UI-стек. Workspaces описывают
+# отдельные manifests описывают точные runtime-наборы двух фоновых образов
+# и фиксируют их независимыми lock-файлами.
+FROM base AS migration-deps
+COPY docker/migration-runtime/package.json docker/migration-runtime/package-lock.json ./
+RUN npm ci --omit=dev
+
+FROM base AS worker-deps
+COPY docker/worker-runtime/package.json docker/worker-runtime/package-lock.json ./
 RUN npm ci --omit=dev
 
 # Генерация Prisma не зависит от Next.js. Выносим её в отдельную стадию,
@@ -102,10 +107,9 @@ RUN addgroup --system --gid 1001 nodejs \
 
 # --chown при COPY не создаёт второй огромный слой, в отличие от последующего
 # `chown -R` по всему node_modules.
-COPY --from=prod-deps --chown=prisma:nodejs /app/node_modules ./node_modules
+COPY --from=migration-deps --chown=prisma:nodejs /app/node_modules ./node_modules
 COPY --chown=prisma:nodejs package.json package-lock.json prisma.config.ts ./
 COPY --chown=prisma:nodejs prisma ./prisma
-COPY --from=prisma-generated --chown=prisma:nodejs /app/generated ./generated
 
 USER prisma
 CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
@@ -115,8 +119,8 @@ CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
 # что нужно веб-серверу, а воркер в неё не входит вовсе. Бандлить его тоже
 # нельзя — BullMQ грузит lua-скрипты с диска, и сборка их теряет.
 #
-# Поэтому здесь полные node_modules и запуск через tsx. Образ больше,
-# зато воркер работает тем же кодом, что в разработке, без второй сборки.
+# Поэтому код запускается через tsx, но node_modules содержит только зависимости
+# worker-runtime, без Next.js, UI и инструментов тестирования.
 FROM base AS worker
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -124,7 +128,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nodejs
 
-COPY --from=prod-deps --chown=nodejs:nodejs /app/node_modules ./node_modules
+COPY --from=worker-deps --chown=nodejs:nodejs /app/node_modules ./node_modules
 # tsx читает paths из tsconfig во время запуска. Без него алиас @/* трактуется
 # как имя npm-пакета, и production worker падает с ERR_MODULE_NOT_FOUND.
 COPY --chown=nodejs:nodejs package.json package-lock.json prisma.config.ts tsconfig.json ./

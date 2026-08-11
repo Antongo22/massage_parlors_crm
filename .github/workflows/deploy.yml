@@ -20,8 +20,8 @@ concurrency:
 env:
   # Несекретные значения можно переопределить в Settings → Secrets and
   # variables → Actions → Variables. Значения ниже уже подходят этой VPS.
-  SSH_HOST: ${{ secrets.SSH_HOST || vars.SSH_HOST || '83.217.203.34' }}
-  SSH_USERNAME: ${{ secrets.SSH_USERNAME || vars.SSH_USERNAME || 'root' }}
+  SSH_HOST: ${{ secrets.SSH_HOST }}
+  SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
   SSH_PORT: ${{ secrets.SSH_PORT || vars.SSH_PORT || '22' }}
   DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || vars.DEPLOY_PATH || '/root/massage_parlors_crm' }}
   DEPLOY_BRANCH: main
@@ -52,6 +52,11 @@ jobs:
         env:
           PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
         run: |
+          if [[ -z "$SSH_HOST" || -z "$SSH_USERNAME" ]]; then
+            echo "::error::Добавьте SSH_HOST и SSH_USERNAME в Actions Secrets"
+            exit 1
+          fi
+
           if [[ -z "$PRODUCTION_ENV" ]]; then
             echo "::error::Добавьте secret PRODUCTION_ENV в GitHub Environment production"
             exit 1

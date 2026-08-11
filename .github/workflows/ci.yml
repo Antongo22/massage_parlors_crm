@@ -58,9 +58,17 @@ jobs:
       - run: docker build --target worker -t massage-crm-worker:ci .
 
       - run: >-
-          docker run --rm massage-crm-worker:ci
+          docker run --rm
+          -e NODE_OPTIONS=--conditions=react-server
+          massage-crm-worker:ci
           ./node_modules/.bin/tsx -e
-          "import('@/lib/domain/time').then(() => console.log('worker aliases ok'))"
+          "Promise.all([
+            import('@/lib/db'),
+            import('@/lib/mail'),
+            import('@/lib/queue'),
+            import('@/lib/services/notifications'),
+            import('@/lib/services/subscriptions')
+          ]).then(() => console.log('worker runtime imports ok'))"
 
   tests:
     name: Тесты домена и БД

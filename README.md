@@ -473,10 +473,9 @@ MAILPIT_MAX_MESSAGES=1000
 MAILPIT_MAX_AGE=30d
 ```
 
-`SSH_HOST`, `SSH_USERNAME`, `SSH_PORT`, `DEPLOY_PATH`, `PUBLIC_URL` можно задать
-как Actions Secrets или Variables. Для текущей VPS уже заданы defaults:
-`root@83.217.203.34:22`, путь
-`/root/massage_parlors_crm`, публичный адрес `https://trexon-a.ru`.
+`SSH_HOST` и `SSH_USERNAME` обязательны и читаются только из Actions Secrets.
+`SSH_PORT`, `DEPLOY_PATH` и `PUBLIC_URL` можно задать как Actions Secrets или
+Variables; для них workflow содержит безопасные несекретные значения по умолчанию.
 
 Бэкап базы — `./scripts/backup.sh` (хранит последние 14 дампов).
 
