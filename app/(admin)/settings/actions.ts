@@ -1,13 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth-guards";
 import { encryptSecret, tryDecryptSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
+import { RESET_CONFIRMATION } from "@/lib/domain/data-management";
 import { resolveFallbackMailSettings, sendTestMail } from "@/lib/mail";
+import { resetApplicationData } from "@/lib/services/data-management";
+import { fillDemoData } from "@/prisma/demo-fill";
 
 export type SettingsState = { error?: string; notice?: string };
+export type DataManagementState = { error?: string; notice?: string };
 
 const settingsSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -114,6 +119,51 @@ export async function sendSettingsTestMail(
             : `Письмо отправлено на ${to}`,
       }
     : { error: `Не удалось отправить: ${result.error}` };
+}
+
+export async function applyDemoData(
+  _prev: DataManagementState,
+): Promise<DataManagementState> {
+  await requireAdmin();
+
+  try {
+    const result = await fillDemoData();
+
+    for (const path of [
+      "/dashboard",
+      "/calendar",
+      "/clients",
+      "/services",
+      "/subscriptions",
+      "/finance",
+      "/chat",
+    ]) {
+      revalidatePath(path);
+    }
+
+    return {
+      notice:
+        `Готово: ${result.clientCount} клиентов, ${result.serviceCount} услуг, ` +
+        `${result.appointmentCount} записей, ${result.subscriptionCount} абонементов`,
+    };
+  } catch (error) {
+    console.error("Не удалось применить демонстрационные данные", error);
+    return { error: error instanceof Error ? error.message : "Не удалось добавить данные" };
+  }
+}
+
+export async function resetCrm(
+  _prev: DataManagementState,
+  formData: FormData,
+): Promise<DataManagementState> {
+  await requireAdmin();
+
+  if (String(formData.get("confirmation") ?? "").trim() !== RESET_CONFIRMATION) {
+    return { error: `Введите «${RESET_CONFIRMATION}» без изменений` };
+  }
+
+  await resetApplicationData();
+  redirect("/setup");
 }
 
 function readForm(formData: FormData) {

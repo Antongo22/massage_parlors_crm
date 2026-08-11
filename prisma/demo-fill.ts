@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { pathToFileURL } from "node:url";
 import { Queue } from "bullmq";
 import { fromZonedTime } from "date-fns-tz";
 import IORedis from "ioredis";
@@ -46,7 +47,15 @@ const PAST_APPOINTMENTS = 22;
 type BusyInterval = { startsAt: Date; blockedUntil: Date };
 type Candidate = { startsAt: Date; endsAt: Date; blockedUntil: Date };
 
-async function main() {
+export type DemoFillResult = {
+  clientCount: number;
+  serviceCount: number;
+  appointmentCount: number;
+  subscriptionCount: number;
+  messageCount: number;
+};
+
+export async function fillDemoData(): Promise<DemoFillResult> {
   const organization = await prisma.organization.findFirst();
   const master = await prisma.master.findFirst({
     where: { isActive: true, workingHours: { some: {} } },
@@ -97,6 +106,8 @@ async function main() {
     `Готово без удаления данных: ${clientCount} клиентов, ${serviceCount} услуг, ` +
       `${appointmentCount} записей, ${subscriptionCount} абонементов, ${messageCount} сообщений`,
   );
+
+  return { clientCount, serviceCount, appointmentCount, subscriptionCount, messageCount };
 }
 
 async function ensureCatalog() {
@@ -532,11 +543,17 @@ async function ensureReminderJobs() {
   }
 }
 
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+const launchedFromCli = process.argv[1]
+  ? pathToFileURL(process.argv[1]).href === import.meta.url
+  : false;
+
+if (launchedFromCli) {
+  fillDemoData()
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

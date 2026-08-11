@@ -1,4 +1,5 @@
 import { SettingsForm } from "@/components/settings/settings-form";
+import { DataManagement } from "@/components/settings/data-management";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
@@ -75,6 +76,8 @@ export default async function SettingsPage() {
           </p>
         </CardContent>
       </Card>
+
+      <DataManagement />
     </div>
   );
 }
