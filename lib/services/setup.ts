@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { encryptSecret } from "@/lib/crypto";
+import type { SetupStep } from "@/lib/domain/setup";
 import { getOrganization } from "@/lib/services/organization";
 
 /**
@@ -13,17 +14,22 @@ import { getOrganization } from "@/lib/services/organization";
  * и чинить, когда они разойдутся (прерванная настройка, откат, ручная правка).
  */
 
-export const SETUP_STEPS = 3;
-
-export type SetupStep = 1 | 2 | 3;
-
 export type SetupState = {
   step: SetupStep;
   completed: boolean;
   organizationName: string | null;
+  timezone: string;
   adminName: string | null;
   adminEmail: string | null;
   masterName: string | null;
+  masterSpecialization: string | null;
+  workingHours: Array<{ weekday: number; startMinute: number; endMinute: number }>;
+  slotStepMinutes: number;
+  bufferMinutes: number;
+  minLeadTimeMinutes: number;
+  cancellationWindowHours: number;
+  reminderOffsetMinutes: number;
+  chargeSubscriptionOnNoShow: boolean;
 };
 
 export async function getSetupState(): Promise<SetupState> {
@@ -34,27 +40,53 @@ export async function getSetupState(): Promise<SetupState> {
       step: 1,
       completed: false,
       organizationName: null,
+      timezone: "Europe/Moscow",
       adminName: null,
       adminEmail: null,
       masterName: null,
+      masterSpecialization: null,
+      workingHours: [],
+      slotStepMinutes: 15,
+      bufferMinutes: 15,
+      minLeadTimeMinutes: 120,
+      cancellationWindowHours: 12,
+      reminderOffsetMinutes: 120,
+      chargeSubscriptionOnNoShow: true,
     };
   }
 
   const [admin, master] = await Promise.all([
     prisma.user.findFirst({ where: { role: "ADMIN" }, select: { name: true, email: true } }),
     prisma.master.findFirst({
-      where: { workingHours: { some: {} } },
-      select: { displayName: true },
+      select: {
+        displayName: true,
+        specialization: true,
+        workingHours: {
+          orderBy: [{ weekday: "asc" }, { startMinute: "asc" }],
+          select: { weekday: true, startMinute: true, endMinute: true },
+        },
+      },
     }),
   ]);
 
+  const scheduleConfigured = Boolean(master?.workingHours.length);
+
   return {
-    step: master ? 3 : 2,
+    step: scheduleConfigured ? 3 : 2,
     completed: organization.setupCompletedAt != null,
     organizationName: organization.name,
+    timezone: organization.timezone,
     adminName: admin?.name ?? null,
     adminEmail: admin?.email ?? null,
     masterName: master?.displayName ?? null,
+    masterSpecialization: master?.specialization ?? null,
+    workingHours: master?.workingHours ?? [],
+    slotStepMinutes: organization.slotStepMinutes,
+    bufferMinutes: organization.bufferMinutes,
+    minLeadTimeMinutes: organization.minLeadTimeMinutes,
+    cancellationWindowHours: organization.cancellationWindowHours,
+    reminderOffsetMinutes: organization.reminderOffsetMinutes,
+    chargeSubscriptionOnNoShow: organization.chargeSubscriptionOnNoShow,
   };
 }
 
@@ -88,11 +120,25 @@ export async function saveStep1(input: Step1Input) {
 
     // Email нормализован схемой: уникальный индекс построен по lower(btrim()),
     // и запись с другим регистром упала бы на нём, а не создала второго админа.
-    await tx.user.upsert({
-      where: { email: input.adminEmail },
-      create: { email: input.adminEmail, name: input.adminName, role: "ADMIN" },
-      update: { name: input.adminName, role: "ADMIN" },
+    const existingAdmin = await tx.user.findFirst({
+      where: { role: "ADMIN" },
+      select: { id: true },
     });
+
+    if (existingAdmin) {
+      // При возврате на первый шаг редактируем ту же учётную запись, а не
+      // создаём второго администратора при смене email.
+      await tx.user.update({
+        where: { id: existingAdmin.id },
+        data: { email: input.adminEmail, name: input.adminName },
+      });
+    } else {
+      await tx.user.upsert({
+        where: { email: input.adminEmail },
+        create: { email: input.adminEmail, name: input.adminName, role: "ADMIN" },
+        update: { name: input.adminName, role: "ADMIN" },
+      });
+    }
   });
 }
 

@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { submitStep2, type ActionState } from "@/app/setup/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
@@ -21,8 +23,22 @@ const WEEKDAYS = [
   { weekday: 0, label: "Воскресенье", workingByDefault: false },
 ];
 
-export function StepSchedule({ defaultMasterName }: { defaultMasterName: string }) {
+export type ScheduleDefaults = {
+  configured: boolean;
+  masterName: string;
+  specialization: string;
+  workingHours: Array<{ weekday: number; startMinute: number; endMinute: number }>;
+  slotStepMinutes: number;
+  bufferMinutes: number;
+  minLeadTimeMinutes: number;
+  cancellationWindowHours: number;
+  reminderOffsetMinutes: number;
+  chargeSubscriptionOnNoShow: boolean;
+};
+
+export function StepSchedule({ defaults }: { defaults: ScheduleDefaults }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(submitStep2, {});
+  const hoursByWeekday = new Map(defaults.workingHours.map((hours) => [hours.weekday, hours]));
 
   return (
     <form action={action}>
@@ -36,7 +52,7 @@ export function StepSchedule({ defaultMasterName }: { defaultMasterName: string 
               <Input
                 id="masterName"
                 name="masterName"
-                defaultValue={defaultMasterName}
+                defaultValue={defaults.masterName}
                 placeholder="Анна Смирнова"
                 required
               />
@@ -48,6 +64,7 @@ export function StepSchedule({ defaultMasterName }: { defaultMasterName: string 
               <Input
                 id="specialization"
                 name="specialization"
+                defaultValue={defaults.specialization}
                 placeholder="Классический и спортивный массаж"
               />
             </div>
@@ -63,37 +80,43 @@ export function StepSchedule({ defaultMasterName }: { defaultMasterName: string 
             </div>
 
             <div className="space-y-2">
-              {WEEKDAYS.map((day) => (
-                <div key={day.weekday} className="flex items-center gap-3">
-                  <label className="flex w-40 shrink-0 items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      name={`day-${day.weekday}-enabled`}
-                      defaultChecked={day.workingByDefault}
-                      className="border-input accent-primary size-4 rounded"
-                    />
-                    {day.label}
-                  </label>
+              {WEEKDAYS.map((day) => {
+                const savedHours = hoursByWeekday.get(day.weekday);
 
-                  <Input
-                    type="time"
-                    name={`day-${day.weekday}-start`}
-                    defaultValue="10:00"
-                    step={900}
-                    className="w-32"
-                    aria-label={`${day.label}: начало`}
-                  />
-                  <span className="text-muted-foreground text-sm">—</span>
-                  <Input
-                    type="time"
-                    name={`day-${day.weekday}-end`}
-                    defaultValue="20:00"
-                    step={900}
-                    className="w-32"
-                    aria-label={`${day.label}: окончание`}
-                  />
-                </div>
-              ))}
+                return (
+                  <div key={day.weekday} className="flex items-center gap-3">
+                    <label className="flex w-40 shrink-0 items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        name={`day-${day.weekday}-enabled`}
+                        defaultChecked={
+                          defaults.configured ? Boolean(savedHours) : day.workingByDefault
+                        }
+                        className="border-input accent-primary size-4 rounded"
+                      />
+                      {day.label}
+                    </label>
+
+                    <Input
+                      type="time"
+                      name={`day-${day.weekday}-start`}
+                      defaultValue={formatMinute(savedHours?.startMinute ?? 600)}
+                      step={900}
+                      className="w-32"
+                      aria-label={`${day.label}: начало`}
+                    />
+                    <span className="text-muted-foreground text-sm">—</span>
+                    <Input
+                      type="time"
+                      name={`day-${day.weekday}-end`}
+                      defaultValue={formatMinute(savedHours?.endMinute ?? 1200)}
+                      step={900}
+                      className="w-32"
+                      aria-label={`${day.label}: окончание`}
+                    />
+                  </div>
+                );
+              })}
             </div>
             <FieldError state={state} field="days" />
           </div>
@@ -113,35 +136,35 @@ export function StepSchedule({ defaultMasterName }: { defaultMasterName: string 
                 name="slotStepMinutes"
                 label="Шаг сетки, мин"
                 hint="С какой частотой предлагать время начала"
-                defaultValue={15}
+                defaultValue={defaults.slotStepMinutes}
                 state={state}
               />
               <NumberField
                 name="bufferMinutes"
                 label="Перерыв после сеанса, мин"
                 hint="Проветривание и уборка. Учитывается при поиске слотов"
-                defaultValue={15}
+                defaultValue={defaults.bufferMinutes}
                 state={state}
               />
               <NumberField
                 name="minLeadTimeMinutes"
                 label="Мин. запас до сеанса, мин"
                 hint="Насколько заранее клиент может записаться сам"
-                defaultValue={120}
+                defaultValue={defaults.minLeadTimeMinutes}
                 state={state}
               />
               <NumberField
                 name="cancellationWindowHours"
                 label="Окно отмены, ч"
                 hint="За сколько часов отмена считается своевременной"
-                defaultValue={12}
+                defaultValue={defaults.cancellationWindowHours}
                 state={state}
               />
               <NumberField
                 name="reminderOffsetMinutes"
                 label="Напоминание за, мин"
                 hint="За сколько до сеанса уходит письмо клиенту"
-                defaultValue={120}
+                defaultValue={defaults.reminderOffsetMinutes}
                 state={state}
               />
             </div>
@@ -150,7 +173,7 @@ export function StepSchedule({ defaultMasterName }: { defaultMasterName: string 
               <input
                 type="checkbox"
                 name="chargeSubscriptionOnNoShow"
-                defaultChecked
+                defaultChecked={defaults.chargeSubscriptionOnNoShow}
                 className="border-input accent-primary mt-0.5 size-4 rounded"
               />
               <span>
@@ -164,7 +187,15 @@ export function StepSchedule({ defaultMasterName }: { defaultMasterName: string 
           </div>
         </CardContent>
 
-        <CardFooter className="justify-end">
+        <CardFooter className="justify-between">
+          <Button
+            variant="outline"
+            render={<Link href="/setup?step=1" />}
+            nativeButton={false}
+          >
+            <ArrowLeft className="size-4" />
+            Назад
+          </Button>
           <Button type="submit" disabled={pending}>
             {pending ? "Сохранение…" : "Далее"}
           </Button>
@@ -172,6 +203,12 @@ export function StepSchedule({ defaultMasterName }: { defaultMasterName: string 
       </Card>
     </form>
   );
+}
+
+function formatMinute(value: number): string {
+  const hours = String(Math.floor(value / 60)).padStart(2, "0");
+  const minutes = String(value % 60).padStart(2, "0");
+  return `${hours}:${minutes}`;
 }
 
 function NumberField({

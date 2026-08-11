@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { sendTestEmail, submitStep3, type ActionState } from "@/app/setup/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
@@ -183,7 +185,15 @@ export function StepMail({
           )}
         </CardContent>
 
-        <CardFooter className="justify-end">
+        <CardFooter className="justify-between">
+          <Button
+            variant="outline"
+            render={<Link href="/setup?step=2" />}
+            nativeButton={false}
+          >
+            <ArrowLeft className="size-4" />
+            Назад
+          </Button>
           <Button type="submit" formAction={saveAction} disabled={saving}>
             {saving ? "Завершение…" : "Завершить настройку"}
           </Button>

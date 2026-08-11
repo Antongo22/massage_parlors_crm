@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
+import { SETUP_STEPS, type SetupStep } from "@/lib/domain/setup";
 import { cn } from "@/lib/utils";
-import { SETUP_STEPS, type SetupStep } from "@/lib/services/setup";
 
 const STEP_TITLES: Record<SetupStep, string> = {
   1: "Салон",

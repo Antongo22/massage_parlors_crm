@@ -24,7 +24,17 @@ const TIMEZONES = [
   { value: "Asia/Tbilisi", label: "Тбилиси (UTC+4)" },
 ];
 
-export function StepOrganization() {
+export function StepOrganization({
+  organizationName,
+  timezone,
+  adminName,
+  adminEmail,
+}: {
+  organizationName: string | null;
+  timezone: string;
+  adminName: string | null;
+  adminEmail: string | null;
+}) {
   const [state, action, pending] = useActionState<ActionState, FormData>(submitStep1, {});
 
   return (
@@ -39,7 +49,7 @@ export function StepOrganization() {
               id="organizationName"
               name="organizationName"
               placeholder="Массажный кабинет «Тишина»"
-              defaultValue=""
+              defaultValue={organizationName ?? ""}
               autoFocus
               required
             />
@@ -53,7 +63,7 @@ export function StepOrganization() {
             <select
               id="timezone"
               name="timezone"
-              defaultValue="Europe/Moscow"
+              defaultValue={timezone}
               className="border-input bg-background focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px]"
               required
             >
@@ -72,7 +82,13 @@ export function StepOrganization() {
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="adminName">Имя администратора</Label>
-              <Input id="adminName" name="adminName" placeholder="Анна Смирнова" required />
+              <Input
+                id="adminName"
+                name="adminName"
+                defaultValue={adminName ?? ""}
+                placeholder="Анна Смирнова"
+                required
+              />
               <FieldError state={state} field="adminName" />
             </div>
 
@@ -82,6 +98,7 @@ export function StepOrganization() {
                 id="adminEmail"
                 name="adminEmail"
                 type="email"
+                defaultValue={adminEmail ?? ""}
                 placeholder="anna@example.com"
                 required
               />

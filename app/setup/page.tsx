@@ -2,6 +2,7 @@ import { WizardShell } from "@/components/setup/wizard-shell";
 import { StepMail } from "@/components/setup/step-mail";
 import { StepOrganization } from "@/components/setup/step-organization";
 import { StepSchedule } from "@/components/setup/step-schedule";
+import { resolveSetupStep } from "@/lib/domain/setup";
 import { catalogIsEmpty } from "@/lib/services/demo-catalog";
 import { getSetupState } from "@/lib/services/setup";
 
@@ -25,21 +26,47 @@ const COPY = {
   },
 } as const;
 
-export default async function SetupPage() {
-  const state = await getSetupState();
-  const copy = COPY[state.step];
+export default async function SetupPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ step?: string }>;
+}) {
+  const [state, params] = await Promise.all([getSetupState(), searchParams]);
+  const displayedStep = resolveSetupStep(params.step, state.step);
+  const copy = COPY[displayedStep];
 
   return (
-    <WizardShell step={state.step} title={copy.title} description={copy.description}>
-      {state.step === 1 && <StepOrganization />}
-
-      {state.step === 2 && (
-        // В частном салоне администратор и мастер обычно один человек,
-        // поэтому имя подставляется — но остаётся редактируемым.
-        <StepSchedule defaultMasterName={state.masterName ?? state.adminName ?? ""} />
+    <WizardShell step={displayedStep} title={copy.title} description={copy.description}>
+      {displayedStep === 1 && (
+        <StepOrganization
+          organizationName={state.organizationName}
+          timezone={state.timezone}
+          adminName={state.adminName}
+          adminEmail={state.adminEmail}
+        />
       )}
 
-      {state.step === 3 && (
+      {displayedStep === 2 && (
+        // В частном салоне администратор и мастер обычно один человек,
+        // поэтому имя подставляется — но остаётся редактируемым.
+        <StepSchedule
+          defaults={{
+            configured: state.step === 3,
+            masterName: state.masterName ?? state.adminName ?? "",
+            specialization: state.masterSpecialization ?? "",
+            workingHours: state.workingHours,
+            slotStepMinutes: state.step === 3 ? state.slotStepMinutes : 15,
+            bufferMinutes: state.step === 3 ? state.bufferMinutes : 15,
+            minLeadTimeMinutes: state.step === 3 ? state.minLeadTimeMinutes : 120,
+            cancellationWindowHours: state.step === 3 ? state.cancellationWindowHours : 12,
+            reminderOffsetMinutes: state.step === 3 ? state.reminderOffsetMinutes : 120,
+            chargeSubscriptionOnNoShow:
+              state.step === 3 ? state.chargeSubscriptionOnNoShow : true,
+          }}
+        />
+      )}
+
+      {displayedStep === 3 && (
         <StepMail
           adminEmail={state.adminEmail}
           catalogIsEmpty={await catalogIsEmpty()}

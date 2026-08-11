@@ -43,8 +43,8 @@ async function assertSetupOpen(expectedStep: 1 | 2 | 3): Promise<ActionState | n
     return { error: "Настройка уже завершена" };
   }
 
-  if (state.step !== expectedStep) {
-    return { error: `Этот шаг сейчас недоступен: система ожидает шаг ${state.step}` };
+  if (state.step < expectedStep) {
+    return { error: `Сначала завершите шаг ${state.step}` };
   }
 
   return null;
@@ -70,7 +70,7 @@ export async function submitStep1(
 
   await saveStep1(parsed.data);
   revalidatePath("/setup");
-  redirect("/setup");
+  redirect("/setup?step=2");
 }
 
 export async function submitStep2(
@@ -105,7 +105,7 @@ export async function submitStep2(
 
   await saveStep2(parsed.data);
   revalidatePath("/setup");
-  redirect("/setup");
+  redirect("/setup?step=3");
 }
 
 export async function submitStep3(
