@@ -4,6 +4,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { resolveFallbackMailSettings, sendTestMail } from "@/lib/mail";
+import {
+  grantSetupAccess,
+  hasSetupAccess,
+  isSetupPasswordConfigured,
+  isSetupPasswordValid,
+} from "@/lib/setup-access";
 import { seedDemoCatalog } from "@/lib/services/demo-catalog";
 import {
   getSetupState,
@@ -30,6 +36,26 @@ export type ActionState = {
   notice?: string;
 };
 
+export type SetupUnlockState = { error?: string };
+
+export async function unlockSetup(
+  _prev: SetupUnlockState,
+  formData: FormData,
+): Promise<SetupUnlockState> {
+  if (!isSetupPasswordConfigured()) {
+    redirect("/setup");
+  }
+
+  const password = String(formData.get("setupPassword") ?? "");
+
+  if (!isSetupPasswordValid(password)) {
+    return { error: "Неверный пароль установки" };
+  }
+
+  await grantSetupAccess();
+  redirect("/setup");
+}
+
 function fieldErrorsOf(error: z.ZodError): Record<string, string> {
   return Object.fromEntries(
     error.issues.map((issue) => [issue.path.join(".") || "form", issue.message]),
@@ -37,6 +63,10 @@ function fieldErrorsOf(error: z.ZodError): Record<string, string> {
 }
 
 async function assertSetupOpen(expectedStep: 1 | 2 | 3): Promise<ActionState | null> {
+  if (!(await hasSetupAccess())) {
+    return { error: "Сначала введите пароль первоначальной настройки" };
+  }
+
   const state = await getSetupState();
 
   if (state.completed) {

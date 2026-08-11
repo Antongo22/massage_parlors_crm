@@ -457,6 +457,9 @@ POSTGRES_USER=crm
 POSTGRES_PASSWORD=replace-with-a-long-alphanumeric-password
 POSTGRES_DB=crm
 AUTH_SECRET=replace-with-openssl-rand-base64-32
+# Защищает wizard до создания администратора. Сгенерировать:
+# openssl rand -base64 24
+SETUP_ACCESS_PASSWORD=replace-with-a-long-random-setup-password
 # Необязательно: без этих значений wizard предложит закрытый Mailpit.
 # Настоящий SMTP удобнее задать позже через интерфейс.
 SMTP_HOST=

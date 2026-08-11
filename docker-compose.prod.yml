@@ -15,6 +15,8 @@ x-app-env: &app-env
   AUTH_SECRET: ${AUTH_SECRET}
   AUTH_URL: https://${DOMAIN}
   AUTH_TRUST_HOST: "true"
+  # Пока администратор ещё не создан, этот пароль закрывает публичный wizard.
+  SETUP_ACCESS_PASSWORD: ${SETUP_ACCESS_PASSWORD:-}
   # Значения по умолчанию для первого запуска. После wizard настройки почты
   # берутся из базы, и менять их можно через интерфейс, не заходя на сервер.
   SMTP_HOST: ${SMTP_HOST:-}

@@ -8,6 +8,7 @@ import { encryptSecret, tryDecryptSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
 import { RESET_CONFIRMATION } from "@/lib/domain/data-management";
 import { resolveFallbackMailSettings, sendTestMail } from "@/lib/mail";
+import { grantSetupAccess } from "@/lib/setup-access";
 import { resetApplicationData } from "@/lib/services/data-management";
 import { fillDemoData } from "@/prisma/demo-fill";
 
@@ -163,6 +164,9 @@ export async function resetCrm(
   }
 
   await resetApplicationData();
+  // Сброс инициировал уже аутентифицированный администратор, поэтому после
+  // удаления данных можно сразу открыть ему wizard, не спрашивая второй пароль.
+  await grantSetupAccess();
   redirect("/setup");
 }
 

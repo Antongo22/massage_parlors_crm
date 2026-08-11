@@ -16,6 +16,7 @@ x-app-env: &app-env
   AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-me}
   AUTH_URL: ${AUTH_URL:-http://localhost:8080}
   AUTH_TRUST_HOST: "true"
+  SETUP_ACCESS_PASSWORD: ${SETUP_ACCESS_PASSWORD:-}
   # Внутри compose Next слушает 3000; с хоста приложение доступно на 8080.
   PORT: "3000"
   SMTP_HOST: mailpit
