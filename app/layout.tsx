@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 /**
@@ -16,6 +16,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "CRM массажного салона",
   description: "Записи, клиенты, абонементы и финансы частного массажного салона",
+  applicationName: "CRM массажного салона",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#08776d",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
