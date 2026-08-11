@@ -53,6 +53,15 @@ jobs:
 
       - run: docker run --rm massage-crm-migration:ci ./node_modules/.bin/prisma --version
 
+      # Production worker запускается через tsx и использует алиас @/*. Один
+      # только build не замечает отсутствующий tsconfig в финальном образе.
+      - run: docker build --target worker -t massage-crm-worker:ci .
+
+      - run: >-
+          docker run --rm massage-crm-worker:ci
+          ./node_modules/.bin/tsx -e
+          "import('@/lib/domain/time').then(() => console.log('worker aliases ok'))"
+
   tests:
     name: Тесты домена и БД
     runs-on: ubuntu-latest
@@ -141,7 +150,7 @@ jobs:
       mailpit:
         # Вход идёт по ссылке из письма, и тест читает его через API Mailpit.
         # Так проверяется настоящая цепочка «форма → письмо → сессия».
-        image: axllent/mailpit:latest
+        image: axllent/mailpit:v1.30.0
         ports:
           - 1025:1025
           - 8025:8025

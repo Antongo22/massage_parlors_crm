@@ -125,7 +125,9 @@ RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nodejs
 
 COPY --from=prod-deps --chown=nodejs:nodejs /app/node_modules ./node_modules
-COPY --chown=nodejs:nodejs package.json package-lock.json prisma.config.ts ./
+# tsx читает paths из tsconfig во время запуска. Без него алиас @/* трактуется
+# как имя npm-пакета, и production worker падает с ERR_MODULE_NOT_FOUND.
+COPY --chown=nodejs:nodejs package.json package-lock.json prisma.config.ts tsconfig.json ./
 COPY --chown=nodejs:nodejs prisma ./prisma
 COPY --chown=nodejs:nodejs lib ./lib
 COPY --chown=nodejs:nodejs worker ./worker
