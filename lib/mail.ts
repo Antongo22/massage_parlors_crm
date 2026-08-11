@@ -59,6 +59,12 @@ export function createTransport(settings: MailSettings): Transporter {
     host: settings.host,
     port: settings.port,
     secure: settings.secure,
+    // Облачные VPS нередко блокируют исходящие SMTP-порты. Без явных
+    // таймаутов Server Action ждёт дольше nginx и пользователь видит 504
+    // вместо понятной ошибки в форме.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
     // Пустой auth для локального Mailpit: он не требует аутентификации,
     // а переданный пустой логин заставил бы nodemailer её пытаться.
     auth: settings.user ? { user: settings.user, pass: settings.password ?? "" } : undefined,
@@ -66,6 +72,26 @@ export function createTransport(settings: MailSettings): Transporter {
 }
 
 export type SendResult = { ok: true } | { ok: false; error: string };
+
+function mailErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+
+  const code = (error as Error & { code?: string }).code;
+
+  if (code === "ETIMEDOUT") {
+    return "SMTP-сервер не ответил за 20 секунд. Проверьте, разрешён ли исходящий SMTP-порт у хостинг-провайдера";
+  }
+
+  if (code === "EAUTH") {
+    return "SMTP отклонил логин или пароль. Используйте полный адрес ящика и пароль приложения";
+  }
+
+  if (code === "ECONNECTION" || code === "ESOCKET" || code === "ECONNREFUSED") {
+    return `Не удалось подключиться к SMTP-серверу: ${error.message}`;
+  }
+
+  return error.message;
+}
 
 /**
  * Отправка письма. Ошибки возвращаются значением, а не исключением: почти все
@@ -88,7 +114,7 @@ export async function sendMail(message: {
     await createTransport(settings).sendMail({ from: settings.from, ...message });
     return { ok: true };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: mailErrorMessage(error) };
   }
 }
 
@@ -96,7 +122,8 @@ export async function sendMail(message: {
 export async function sendTestMail(settings: MailSettings, to: string): Promise<SendResult> {
   try {
     const transport = createTransport(settings);
-    await transport.verify();
+    // sendMail сам устанавливает соединение и проверяет авторизацию. Отдельный
+    // verify создавал второе SMTP-соединение и вдвое увеличивал время ожидания.
     await transport.sendMail({
       from: settings.from,
       to,
@@ -108,6 +135,6 @@ export async function sendTestMail(settings: MailSettings, to: string): Promise<
 
     return { ok: true };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: mailErrorMessage(error) };
   }
 }
