@@ -160,6 +160,32 @@ jobs:
           script: |
             set -eu
 
+            # Bootstrap-очистка выполняется до git fetch. Она нужна, когда
+            # Docker занял диск целиком и Git уже не может обновить deploy.sh.
+            if docker info >/dev/null 2>&1; then
+              docker_root="$(docker info --format '{{.DockerRootDir}}')"
+              free_mb="$(df -Pm "$docker_root" | awk 'NR == 2 { print $4 }')"
+
+              if [ "$free_mb" -lt 2048 ]; then
+                echo "На диске свободно ${free_mb} МБ — освобождаем Docker build-cache до git fetch"
+                docker builder prune --all --force >/dev/null || true
+                docker image prune --force >/dev/null || true
+
+                # Удаляем только старые неиспользуемые образы этой CRM.
+                # Volumes PostgreSQL/Redis и образы других приложений не трогаем.
+                docker image ls --format '{{.Repository}}:{{.Tag}}' | while IFS= read -r image_ref; do
+                  case "$image_ref" in
+                    "${IMAGE_PREFIX}-app:"*|"${IMAGE_PREFIX}-migration:"*|"${IMAGE_PREFIX}-worker:"*)
+                      docker image rm "$image_ref" >/dev/null 2>&1 || true
+                      ;;
+                  esac
+                done
+
+                free_mb="$(df -Pm "$docker_root" | awk 'NR == 2 { print $4 }')"
+                echo "После bootstrap-очистки свободно ${free_mb} МБ"
+              fi
+            fi
+
             if [ ! -d "$DEPLOY_PATH/.git" ]; then
               echo "Репозиторий не найден: $DEPLOY_PATH" >&2
               exit 1
