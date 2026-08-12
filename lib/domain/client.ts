@@ -18,7 +18,7 @@ export const clientSchema = z.object({
   firstName: z.string().trim().min(1, "Укажите имя").max(80),
   middleName: z.string().trim().max(80).optional(),
   phone: z.string().trim().min(1, "Укажите телефон"),
-  email: z.string().trim().max(255).optional(),
+  email: z.email("Введите корректный email").max(255).optional(),
   birthDate: z.string().trim().optional(),
   source: z.enum(["WALK_IN", "REFERRAL", "SOCIAL", "SEARCH", "OTHER"]).optional(),
 });

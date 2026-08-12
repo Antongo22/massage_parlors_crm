@@ -58,8 +58,8 @@ export function ClientDialog({
           <DialogHeader>
             <DialogTitle>{client ? "Изменить карточку" : "Новый клиент"}</DialogTitle>
             <DialogDescription>
-              Учётная запись не нужна: карточку можно вести по телефону, а вход в кабинет
-              привяжется к ней по email при первом входе клиента.
+              Если указан email, клиент сразу сможет запросить ссылку для входа в личный кабинет.
+              Без email карточка останется доступна только администратору.
             </DialogDescription>
           </DialogHeader>
 
@@ -104,7 +104,7 @@ export function ClientDialog({
                 <Label htmlFor="email">Email</Label>
                 <Input id="email" name="email" type="email" defaultValue={client?.email ?? ""} />
                 <p className="text-muted-foreground text-xs">
-                  Нужен для напоминаний и входа в кабинет
+                  Создаёт клиентский доступ и используется для напоминаний
                 </p>
               </div>
             </div>

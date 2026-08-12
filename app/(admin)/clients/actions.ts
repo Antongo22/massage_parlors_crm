@@ -5,6 +5,8 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth-guards";
 import { prisma } from "@/lib/db";
 import { clientSchema, normalizePhone } from "@/lib/domain/client";
+import { isDomainError } from "@/lib/domain/errors";
+import { saveClientWithAccess } from "@/lib/services/clients";
 
 export type ClientActionState = { error?: string; ok?: boolean; clientId?: string };
 
@@ -47,15 +49,15 @@ export async function saveClient(
   };
 
   try {
-    const client = input.id
-      ? await prisma.client.update({ where: { id: input.id }, data })
-      : await prisma.client.create({ data });
+    const client = await saveClientWithAccess({ id: input.id, ...data });
 
     revalidatePath("/clients");
     revalidatePath(`/clients/${client.id}`);
 
     return { ok: true, clientId: client.id };
   } catch (error) {
+    if (isDomainError(error)) return { error: error.message };
+
     // Уникальность телефона и email — на уровне базы. Сообщение переводим
     // на человеческий: «Unique constraint failed» ничего не объясняет.
     const message = error instanceof Error ? error.message : "";
