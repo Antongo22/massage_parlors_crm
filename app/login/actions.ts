@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { signIn } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { ensureClientAccessByEmail } from "@/lib/services/clients";
 
 export type LoginState = { error?: string };
 
@@ -24,10 +24,9 @@ export async function requestLoginLink(_prev: LoginState, formData: FormData): P
 
   const email = parsed.data;
 
-  const user = await prisma.user.findUnique({
-    where: { email },
-    select: { isActive: true },
-  });
+  // Помимо уже созданных User, подхватывает старые карточки с email, которые
+  // появились до автоматического создания клиентской учётной записи.
+  const user = await ensureClientAccessByEmail(email);
 
   if (user?.isActive) {
     try {

@@ -165,6 +165,51 @@ export async function saveClientWithAccess(input: SaveClientInput) {
   });
 }
 
+/**
+ * Выдаёт доступ карточкам, созданным до автоматической синхронизации User.
+ * Ответ формы входа от этого не меняется, поэтому наличие клиента по email
+ * по-прежнему нельзя определить снаружи.
+ */
+export async function ensureClientAccessByEmail(email: string) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.user.findUnique({
+      where: { email },
+      select: { id: true, isActive: true },
+    });
+
+    if (existing) return existing;
+
+    const client = await tx.client.findFirst({
+      where: { email, userId: null, archivedAt: null },
+      select: { id: true, firstName: true, lastName: true },
+    });
+
+    if (!client) return null;
+
+    // upsert делает два одновременных запроса ссылки безопасными: оба получат
+    // одну учётную запись, а не столкнутся на уникальном индексе email.
+    const user = await tx.user.upsert({
+      where: { email },
+      create: {
+        email,
+        name: `${client.firstName} ${client.lastName}`,
+        role: "CLIENT",
+      },
+      update: {},
+      select: { id: true, isActive: true, role: true },
+    });
+
+    if (user.role !== "CLIENT") return null;
+
+    await tx.client.update({
+      where: { id: client.id },
+      data: { userId: user.id },
+    });
+
+    return { id: user.id, isActive: user.isActive };
+  });
+}
+
 export async function getClientCard(clientId: string) {
   const client = await prisma.client.findUnique({
     where: { id: clientId },

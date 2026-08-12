@@ -1,5 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { saveClientWithAccess, type SaveClientInput } from "@/lib/services/clients";
+import {
+  ensureClientAccessByEmail,
+  saveClientWithAccess,
+  type SaveClientInput,
+} from "@/lib/services/clients";
 import { pool, truncateAll } from "./helpers";
 
 beforeEach(async () => {
@@ -112,5 +116,26 @@ describe("доступ клиента в личный кабинет", () => {
       `SELECT count(*)::text AS count FROM "Client"`,
     );
     expect(clients.rows[0]?.count).toBe("0");
+  });
+
+  it("при первом запросе ссылки выдаёт доступ ранее созданной карточке", async () => {
+    await pool.query(
+      `INSERT INTO "Client"
+         (id, "lastName", "firstName", phone, email, "noShowCount", "createdAt", "updatedAt")
+       VALUES ('legacy-client', 'Старова', 'Мария', '+79990000002',
+               'legacy@example.com', 0, now(), now())`,
+    );
+
+    const user = await ensureClientAccessByEmail("legacy@example.com");
+    const linked = await pool.query<{ email: string; role: string; userId: string }>(
+      `SELECT u.email, u.role::text, c."userId"
+       FROM "Client" c JOIN "User" u ON u.id = c."userId"
+       WHERE c.id = 'legacy-client'`,
+    );
+
+    expect(user).toEqual({ id: expect.any(String), isActive: true });
+    expect(linked.rows).toEqual([
+      { email: "legacy@example.com", role: "CLIENT", userId: user!.id },
+    ]);
   });
 });
